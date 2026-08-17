@@ -29,6 +29,11 @@ $rawUrls = @(
 )
 $global:apiBase = "https://api.github.com/repos/$global:owner/$global:repo/contents"
 
+# Header di richiesta per evitare blocchi da parte delle API/Raw di GitHub
+$global:webHeaders = @{
+    "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) PowerShell/WorkInstaller"
+}
+
 # ------------------------------------------------------------------------------
 # 3. FUNZIONI HELPER CONDIVISE
 # ------------------------------------------------------------------------------
@@ -47,7 +52,7 @@ function Install-CustomApp ([string]$downloadUrl, [string]$fileName) {
     $outPath = Join-Path $tempFolder $fileName
 
     Write-Host "--> [Custom] Download di $fileName..." -ForegroundColor Yellow
-    Invoke-WebRequest -Uri $downloadUrl -OutFile $outPath -UseBasicParsing
+    Invoke-WebRequest -Uri $downloadUrl -Headers $global:webHeaders -OutFile $outPath -UseBasicParsing
     
     Write-Host "--> [Custom] Esecuzione interattiva $fileName..." -ForegroundColor Yellow
     Start-Process -FilePath $outPath -Wait
@@ -64,7 +69,7 @@ function Execute-BatchTask ([string]$downloadUrl, [string]$fileName) {
     Write-Host "--> [Task] Download dello script $fileName..." -ForegroundColor Cyan
     
     try {
-        Invoke-WebRequest -Uri $downloadUrl -OutFile $outPath -UseBasicParsing -ErrorAction Stop
+        Invoke-WebRequest -Uri $downloadUrl -Headers $global:webHeaders -OutFile $outPath -UseBasicParsing -ErrorAction Stop
         Unblock-File -Path $outPath -ErrorAction SilentlyContinue
 
         Write-Host "--> [Task] Esecuzione di $fileName in corso..." -ForegroundColor Yellow
@@ -99,10 +104,10 @@ function Execute-BatchTask ([string]$downloadUrl, [string]$fileName) {
 function Load-SingleModule ([string]$moduleName) {
     $loaded = $false
     foreach ($baseUrl in $rawUrls) {
-        # Punta direttamente alla radice del ramo principale su GitHub
         $fullUrl = "$baseUrl/$moduleName"
         try {
-            $code = Invoke-RestMethod -Uri $fullUrl -UseBasicParsing -ErrorAction Stop
+            # Invocazione con User-Agent e gestione eccezione dettagliata
+            $code = Invoke-RestMethod -Uri $fullUrl -Headers $global:webHeaders -UseBasicParsing -ErrorAction Stop
             if (-not [string]::IsNullOrWhiteSpace($code)) {
                 Invoke-Expression $code
                 Write-Host " [OK] Modulo $moduleName caricato" -ForegroundColor Green
@@ -111,11 +116,11 @@ function Load-SingleModule ([string]$moduleName) {
                 break
             }
         } catch {
-            # Fallback al secondo URL se il primo fallisce
+            Write-Host " [DEBUG] Traccia errore su $fullUrl : $($_.Exception.Message)" -ForegroundColor DarkGray
         }
     }
     if (-not $loaded) {
-        Write-Host " [ERRORE] Impossibile caricare $moduleName" -ForegroundColor Red
+        Write-Host " [ERRORE CRITICO] Impossibile caricare $moduleName" -ForegroundColor Red
     }
 }
 
