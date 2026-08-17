@@ -23,7 +23,6 @@ Set-Location -Path $env:TEMP
 $global:owner   = "SimoGHcoder"
 $global:repo    = "WorkInstaller"
 
-# L'URL 'raw.githubusercontent.com' è l'unico che restituisce il codice puro anziché la pagina HTML di GitHub
 $global:rawBase = "https://raw.githubusercontent.com/$global:owner/$global:repo/main"
 $global:apiBase = "https://api.github.com/repos/$global:owner/$global:repo/contents"
 
@@ -96,24 +95,38 @@ function Execute-BatchTask ([string]$downloadUrl, [string]$fileName) {
 }
 
 # ------------------------------------------------------------------------------
-# 4. CARICAMENTO E GESTIONE MODULI DALLA RADICE
+# 4. CARICAMENTO CON VERIFICA SINTATTICA (AST PARSER)
 # ------------------------------------------------------------------------------
 function Load-SingleModule ([string]$moduleName) {
     $fullUrl = "$global:rawBase/$moduleName"
     try {
         $code = Invoke-RestMethod -Uri $fullUrl -Headers $global:webHeaders -UseBasicParsing -ErrorAction Stop
-        if (-not [string]::IsNullOrWhiteSpace($code)) {
-            # Verifica che il codice scaricato non contenga HTML
-            if ($code -match "^\s*<!DOCTYPE html>") {
-                Write-Host " [ERRORE] $moduleName ha restituito una pagina HTML invece dello script PowerShell." -ForegroundColor Red
-                return
-            }
-            Invoke-Expression $code
-            Write-Host " [OK] Modulo $moduleName caricato" -ForegroundColor Green
+        
+        if ([string]::IsNullOrWhiteSpace($code)) {
+            Write-Host " [ERRORE] $moduleName è vuoto." -ForegroundColor Red
+            return
         }
+
+        # Validazione sintattica con PowerShell AST
+        $errors = $null
+        $tokens = $null
+        $null = [System.Management.Automation.Language.Parser]::ParseInput($code, [ref]$tokens, [ref]$errors)
+
+        if ($errors.Count -gt 0) {
+            Write-Host " [ERRORE SINTASSI] Trovato errore nel file su GitHub: $moduleName" -ForegroundColor Red
+            foreach ($err in $errors) {
+                Write-Host "   -> Riga $($err.Extent.StartLineNumber), Colonna $($err.Extent.StartColumnNumber): $($err.Message)" -ForegroundColor Yellow
+            }
+            return
+        }
+
+        # Se la sintassi è valida, esegui il codice
+        Invoke-Expression $code
+        Write-Host " [OK] Modulo $moduleName caricato correttamente" -ForegroundColor Green
+
     } catch {
-        Write-Host " [ERRORE DI SINTASSI O DOWNLOAD] Impossibile eseguire $moduleName :" -ForegroundColor Red
-        Write-Host " $_" -ForegroundColor Red
+        Write-Host " [ERRORE DOWNLOAD] Impossibile scaricare $moduleName da $fullUrl" -ForegroundColor Red
+        Write-Host "   Detail: $_" -ForegroundColor DarkRed
     }
 }
 
