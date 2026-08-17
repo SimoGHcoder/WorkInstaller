@@ -1,3 +1,8 @@
+Se i moduli si trovano direttamente nella radice del ramo `main` (senza la cartella `modules/`), la chiamata a `$baseUrl/modules/$moduleName` falliva restituendo 404.
+
+Ecco il file **`install.ps1`** completo e pulito, impostato per scaricare i moduli **esclusivamente dalla radice del ramo `main**` e con tutte le correzioni per l'esecuzione dei task in console dedicata e il passaggio corretto dei parametri di riferimento `[ref]`:
+
+```powershell
 # ==============================================================================
 # WORKINSTALLER - MAIN CONTROLLER
 # Repository: https://github.com/SimoGHcoder/WorkInstaller
@@ -23,13 +28,10 @@ Set-Location -Path $env:TEMP
 $global:owner   = "SimoGHcoder"
 $global:repo    = "WorkInstaller"
 
-$rawUrls = @(
-    "https://raw.githubusercontent.com/$global:owner/$global:repo/main",
-    "https://raw.githubusercontent.com/$global:owner/$global:repo/master"
-)
+# Download diretto dalla radice del ramo main
+$global:rawBase = "https://raw.githubusercontent.com/$global:owner/$global:repo/main"
 $global:apiBase = "https://api.github.com/repos/$global:owner/$global:repo/contents"
 
-# Header di richiesta per evitare blocchi da parte delle API/Raw di GitHub
 $global:webHeaders = @{
     "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) PowerShell/WorkInstaller"
 }
@@ -99,28 +101,19 @@ function Execute-BatchTask ([string]$downloadUrl, [string]$fileName) {
 }
 
 # ------------------------------------------------------------------------------
-# 4. CARICAMENTO E GESTIONE MODULI
+# 4. CARICAMENTO E GESTIONE MODULI DALLA RADICE
 # ------------------------------------------------------------------------------
 function Load-SingleModule ([string]$moduleName) {
-    $loaded = $false
-    foreach ($baseUrl in $rawUrls) {
-        $fullUrl = "$baseUrl/$moduleName"
-        try {
-            # Invocazione con User-Agent e gestione eccezione dettagliata
-            $code = Invoke-RestMethod -Uri $fullUrl -Headers $global:webHeaders -UseBasicParsing -ErrorAction Stop
-            if (-not [string]::IsNullOrWhiteSpace($code)) {
-                Invoke-Expression $code
-                Write-Host " [OK] Modulo $moduleName caricato" -ForegroundColor Green
-                $global:workingRawBase = $baseUrl
-                $loaded = $true
-                break
-            }
-        } catch {
-            Write-Host " [DEBUG] Traccia errore su $fullUrl : $($_.Exception.Message)" -ForegroundColor DarkGray
+    # Punta direttamente alla radice del repo
+    $fullUrl = "$global:rawBase/$moduleName"
+    try {
+        $code = Invoke-RestMethod -Uri $fullUrl -Headers $global:webHeaders -UseBasicParsing -ErrorAction Stop
+        if (-not [string]::IsNullOrWhiteSpace($code)) {
+            Invoke-Expression $code
+            Write-Host " [OK] Modulo $moduleName caricato" -ForegroundColor Green
         }
-    }
-    if (-not $loaded) {
-        Write-Host " [ERRORE CRITICO] Impossibile caricare $moduleName" -ForegroundColor Red
+    } catch {
+        Write-Host " [ERRORE] Impossibile caricare $moduleName da $fullUrl" -ForegroundColor Red
     }
 }
 
@@ -130,12 +123,6 @@ function Load-AllModules {
     Load-SingleModule "module-custom.ps1"
     Load-SingleModule "module-tasks.ps1"
     Load-SingleModule "module-utility.ps1"
-    
-    if ($global:workingRawBase) {
-        $global:rawBase = $global:workingRawBase
-    } else {
-        $global:rawBase = $rawUrls[0]
-    }
 }
 
 function Reload-All {
@@ -170,6 +157,7 @@ do {
     
     $index = 1
 
+    # Invocazione dei menu tramite parametro posizionale del riferimento [ref]
     if (Get-Command Show-ModuleWingetMenu -ErrorAction SilentlyContinue) {
         Show-ModuleWingetMenu ([ref]$index)
     } else {
@@ -230,3 +218,5 @@ do {
     }
 
 } until ($selection -eq 'Q' -or $selection -eq 'q')
+
+```
