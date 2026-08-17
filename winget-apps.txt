@@ -1,0 +1,7 @@
+Google Chrome|Google.Chrome
+Mozilla Firefox|Mozilla.Firefox
+LibreOffice|TheDocumentFoundation.LibreOffice
+7-Zip|7zip.7zip
+VLC Media Player|VideoLAN.VLC
+Notepad++|Notepad++.Notepad++
+Adobe Reader|Adobe.Acrobat.Reader.64-bit
