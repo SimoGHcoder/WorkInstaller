@@ -1,18 +1,18 @@
 # ==============================================================================
-# WORKINSTALLER - MAIN CONTROLLER (FIX DEFINITIVO CARICAMENTO MODULI)
+# WORKINSTALLER - MAIN CONTROLLER (INJECTION GLOBALE DIRETTIVA)
 # Repository: https://github.com/SimoGHcoder/WorkInstaller
 # ==============================================================================
 
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-# 1. Controllo Privilegi Amministratore
+# 1. Controllo Amministratore
 if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     Write-Host "Riavvio con privilegi di Amministratore..." -ForegroundColor Yellow
     Start-Process powershell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
     exit
 }
 
-# 2. Configurazione Repository GitHub
+# 2. Configurazione GitHub
 $global:owner   = "SimoGHcoder"
 $global:repo    = "WorkInstaller"
 
@@ -21,10 +21,6 @@ $rawUrls = @(
     "https://raw.githubusercontent.com/$global:owner/$global:repo/master"
 )
 $global:apiBase = "https://api.github.com/repos/$global:owner/$global:repo/contents"
-
-# Cartella temporanea locale per i moduli
-$moduleCacheDir = Join-Path $env:TEMP "WorkInstaller_Modules"
-if (-not (Test-Path $moduleCacheDir)) { New-Item -ItemType Directory -Path $moduleCacheDir -Force | Out-Null }
 
 # 3. Funzioni Helper Condivise
 function Get-SilentArgs ([string]$fileName) {
@@ -64,33 +60,28 @@ function Execute-BatchTask ([string]$downloadUrl, [string]$fileName) {
     Write-Host "--> Task completato!" -ForegroundColor Green
 }
 
-# 4. Download Locale + Dot-Sourcing Reale
+# 4. Download ed Esecuzione Diretta
 function Load-SingleModule ([string]$moduleName) {
     $loaded = $false
-    $localFilePath = Join-Path $moduleCacheDir $moduleName
-
     foreach ($baseUrl in $rawUrls) {
         $fullUrl = "$baseUrl/$moduleName"
         try {
-            # Download del file .ps1 nella cache temporanea
-            Invoke-WebRequest -Uri $fullUrl -OutFile $localFilePath -UseBasicParsing -ErrorAction Stop
-            
-            if (Test-Path $localFilePath) {
-                # Dot-sourcing diretto del file fisico per registrare le funzioni
-                . $localFilePath
-                
-                Write-Host " [OK] Modulo $moduleName scaricato e registrato" -ForegroundColor Green
+            $code = Invoke-RestMethod -Uri $fullUrl -UseBasicParsing -ErrorAction Stop
+            if (-not [string]::IsNullOrWhiteSpace($code)) {
+                # Iniezione del codice direttamente nello scope del chiamante
+                Invoke-Expression $code
+                Write-Host " [OK] Modulo $moduleName caricato" -ForegroundColor Green
                 $global:workingRawBase = $baseUrl
                 $loaded = $true
                 break
             }
         } catch {
-            # Tenta con l'URL successivo
+            Write-Host " [DETTAGLIO ERRORE] $fullUrl : $_" -ForegroundColor DarkGray
         }
     }
     
     if (-not $loaded) {
-        Write-Host " [ERRORE] Impossibile scaricare $moduleName da GitHub!" -ForegroundColor Red
+        Write-Host " [ERRORE CRITICO] Impossibile caricare $moduleName" -ForegroundColor Red
     }
 }
 
@@ -111,7 +102,6 @@ function Load-AllModules {
 function Reload-All {
     Load-AllModules
     
-    # Recupera i dati dalle funzioni esportate dai moduli
     if (Get-Command Get-ModuleWingetList -ErrorAction SilentlyContinue) {
         $global:wingetList = Get-ModuleWingetList
     } else { $global:wingetList = @() }
@@ -127,10 +117,9 @@ function Reload-All {
     Start-Sleep -Seconds 1
 }
 
-# Caricamento iniziale
 Reload-All
 
-# 5. Ciclo Menu Principale
+# 5. Menu Principale
 do {
     Clear-Host
     Write-Host "=========================================" -ForegroundColor Cyan
@@ -139,7 +128,7 @@ do {
     
     $index = 1
 
-    # 1. Software Winget
+    # 1. Winget
     if (Get-Command Show-ModuleWingetMenu -ErrorAction SilentlyContinue) {
         Show-ModuleWingetMenu -startIndex ([ref]$index)
     } else {
@@ -147,7 +136,7 @@ do {
         Write-Host " (Errore: Modulo module-winget.ps1 non disponibile)" -ForegroundColor Red
     }
 
-    # 2. Installer Custom
+    # 2. Custom
     if (Get-Command Show-ModuleCustomMenu -ErrorAction SilentlyContinue) {
         Show-ModuleCustomMenu -startIndex ([ref]$index)
     } else {
@@ -155,7 +144,7 @@ do {
         Write-Host " (Errore: Modulo module-custom.ps1 non disponibile)" -ForegroundColor Red
     }
 
-    # 3. Operazioni Batch
+    # 3. Tasks
     if (Get-Command Show-ModuleTasksMenu -ErrorAction SilentlyContinue) {
         Show-ModuleTasksMenu -startIndex ([ref]$index)
     } else {
@@ -163,7 +152,7 @@ do {
         Write-Host " (Errore: Modulo module-tasks.ps1 non disponibile)" -ForegroundColor Red
     }
 
-    # 4. Operazioni Massive e Utility
+    # 4. Utility
     if (Get-Command Show-ModuleUtilityMenu -ErrorAction SilentlyContinue) {
         Show-ModuleUtilityMenu
     } else {
