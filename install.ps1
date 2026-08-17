@@ -24,8 +24,8 @@ $global:owner   = "SimoGHcoder"
 $global:repo    = "WorkInstaller"
 
 $rawUrls = @(
-    "https://raw.githubusercontent.com/$global:owner/$global:repo/main",
-    "https://raw.githubusercontent.com/$global:owner/$global:repo/master"
+    "https://raw.githubusercontent.com/$global:owner/$global:repo/blob/main",
+    "https://raw.githubusercontent.com/$global:owner/$global:repo/blob/master"
 )
 $global:apiBase = "https://api.github.com/repos/$global:owner/$global:repo/contents"
 
