@@ -4,7 +4,8 @@ function global:Get-ModuleCustomList {
     try {
         $items = Invoke-RestMethod -Uri $url -UseBasicParsing -ErrorAction Stop
         foreach ($item in $items) {
-            if ($item.type -eq "file") {
+            # Filtro: controlla che sia un file e che NON sia .gitkeep
+            if ($item.type -eq "file" -and $item.name -ne ".gitkeep") {
                 $list += [PSCustomObject]@{
                     Name        = $item.name
                     DownloadUrl = $item.download_url
@@ -12,7 +13,7 @@ function global:Get-ModuleCustomList {
             }
         }
     } catch {
-        # Fallback se la cartella installer/ non esiste o è vuota
+        # Cartella vuota o non presente
     }
     return $list
 }
