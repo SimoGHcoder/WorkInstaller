@@ -1,18 +1,18 @@
 # ==============================================================================
-# WORKINSTALLER - MAIN CONTROLLER (INJECTION GLOBALE DIRETTIVA)
+# WORKINSTALLER - MAIN CONTROLLER
 # Repository: https://github.com/SimoGHcoder/WorkInstaller
 # ==============================================================================
 
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-# 1. Controllo Amministratore
+# Elevazione Amministratore
 if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     Write-Host "Riavvio con privilegi di Amministratore..." -ForegroundColor Yellow
     Start-Process powershell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
     exit
 }
 
-# 2. Configurazione GitHub
+# Configurazione GitHub
 $global:owner   = "SimoGHcoder"
 $global:repo    = "WorkInstaller"
 
@@ -22,7 +22,7 @@ $rawUrls = @(
 )
 $global:apiBase = "https://api.github.com/repos/$global:owner/$global:repo/contents"
 
-# 3. Funzioni Helper Condivise
+# Funzioni Helper Condivise
 function Get-SilentArgs ([string]$fileName) {
     if ($fileName.EndsWith(".msi")) { return "/qn /norestart" } else { return "/S" }
 }
@@ -60,7 +60,7 @@ function Execute-BatchTask ([string]$downloadUrl, [string]$fileName) {
     Write-Host "--> Task completato!" -ForegroundColor Green
 }
 
-# 4. Download ed Esecuzione Diretta
+# Caricamento Moduli
 function Load-SingleModule ([string]$moduleName) {
     $loaded = $false
     foreach ($baseUrl in $rawUrls) {
@@ -68,7 +68,6 @@ function Load-SingleModule ([string]$moduleName) {
         try {
             $code = Invoke-RestMethod -Uri $fullUrl -UseBasicParsing -ErrorAction Stop
             if (-not [string]::IsNullOrWhiteSpace($code)) {
-                # Iniezione del codice direttamente nello scope del chiamante
                 Invoke-Expression $code
                 Write-Host " [OK] Modulo $moduleName caricato" -ForegroundColor Green
                 $global:workingRawBase = $baseUrl
@@ -76,12 +75,11 @@ function Load-SingleModule ([string]$moduleName) {
                 break
             }
         } catch {
-            Write-Host " [DETTAGLIO ERRORE] $fullUrl : $_" -ForegroundColor DarkGray
+            # ignora e prova l'URL di fallback
         }
     }
-    
     if (-not $loaded) {
-        Write-Host " [ERRORE CRITICO] Impossibile caricare $moduleName" -ForegroundColor Red
+        Write-Host " [ERRORE] Impossibile caricare $moduleName" -ForegroundColor Red
     }
 }
 
@@ -119,7 +117,7 @@ function Reload-All {
 
 Reload-All
 
-# 5. Menu Principale
+# Menu Principale
 do {
     Clear-Host
     Write-Host "=========================================" -ForegroundColor Cyan
@@ -128,7 +126,6 @@ do {
     
     $index = 1
 
-    # 1. Winget
     if (Get-Command Show-ModuleWingetMenu -ErrorAction SilentlyContinue) {
         Show-ModuleWingetMenu -startIndex ([ref]$index)
     } else {
@@ -136,7 +133,6 @@ do {
         Write-Host " (Errore: Modulo module-winget.ps1 non disponibile)" -ForegroundColor Red
     }
 
-    # 2. Custom
     if (Get-Command Show-ModuleCustomMenu -ErrorAction SilentlyContinue) {
         Show-ModuleCustomMenu -startIndex ([ref]$index)
     } else {
@@ -144,7 +140,6 @@ do {
         Write-Host " (Errore: Modulo module-custom.ps1 non disponibile)" -ForegroundColor Red
     }
 
-    # 3. Tasks
     if (Get-Command Show-ModuleTasksMenu -ErrorAction SilentlyContinue) {
         Show-ModuleTasksMenu -startIndex ([ref]$index)
     } else {
@@ -152,7 +147,6 @@ do {
         Write-Host " (Errore: Modulo module-tasks.ps1 non disponibile)" -ForegroundColor Red
     }
 
-    # 4. Utility
     if (Get-Command Show-ModuleUtilityMenu -ErrorAction SilentlyContinue) {
         Show-ModuleUtilityMenu
     } else {
