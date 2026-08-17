@@ -1,35 +1,37 @@
-# ==============================================================================
-# MODULO 2: INSTALLER CUSTOM
-# ==============================================================================
-
-function Get-ModuleCustomList {
+function global:Get-ModuleCustomList {
+    $list = @()
+    $url = "$global:apiBase/installer"
     try {
-        $res = Invoke-RestMethod -Uri "$global:apiBase/installer" -Method Get -Headers @{ "User-Agent" = "PowerShell" } -ErrorAction Stop
-        $files = $res | Where-Object { $_.type -eq "file" -and ($_.name -like "*.exe" -or $_.name -like "*.msi") }
-        $installers = @()
-        foreach ($f in $files) {
-            $installers += [PSCustomObject]@{ Name = $f.name; DownloadUrl = "$global:rawBase/installer/$($f.name)"; Type = "Custom" }
+        $items = Invoke-RestMethod -Uri $url -UseBasicParsing -ErrorAction Stop
+        foreach ($item in $items) {
+            if ($item.type -eq "file") {
+                $list += [PSCustomObject]@{
+                    Name        = $item.name
+                    DownloadUrl = $item.download_url
+                }
+            }
         }
-        return $installers
-    } catch { return @() }
+    } catch {
+        # Fallback se la cartella installer/ non esiste o è vuota
+    }
+    return $list
 }
 
-function Show-ModuleCustomMenu ([ref]$startIndex) {
-    Write-Host ""
-    Write-Host " --- 2. INSTALLER CUSTOM (INSTALLER/) ---" -ForegroundColor DarkGray
+function global:Show-ModuleCustomMenu ([ref]$startIndex) {
+    Write-Host "`n --- 2. INSTALLER CUSTOM (INSTALLER/) ---" -ForegroundColor DarkGray
     if ($global:customList.Count -eq 0) {
-        Write-Host " (Nessun file .exe/.msi nella cartella 'installer')" -ForegroundColor Gray
-    } else {
-        foreach ($file in $global:customList) {
-            Write-Host "[$($startIndex.Value)] $($file.Name)"
-            $startIndex.Value++
-        }
+        Write-Host " (Nessun file presente nella cartella installer/)" -ForegroundColor Yellow
+        return
+    }
+    foreach ($item in $global:customList) {
+        Write-Host " [$($startIndex.Value)] $($item.Name)"
+        $startIndex.Value++
     }
 }
 
-function Invoke-ModuleCustomAction ([int]$index) {
-    $file = $global:customList[$index]
-    if ($file) {
-        Install-CustomApp -downloadUrl $file.DownloadUrl -fileName $file.Name
+function global:Invoke-ModuleCustomAction ([int]$index) {
+    if ($index -ge 0 -and $index -lt $global:customList.Count) {
+        $item = $global:customList[$index]
+        Install-CustomApp -downloadUrl $item.DownloadUrl -fileName $item.Name
     }
 }
