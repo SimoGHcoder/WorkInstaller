@@ -60,7 +60,7 @@ function Execute-BatchTask ([string]$downloadUrl, [string]$fileName) {
     Write-Host "--> Task completato!" -ForegroundColor Green
 }
 
-# Caricamento Moduli
+# Download ed Esecuzione Moduli
 function Load-SingleModule ([string]$moduleName) {
     $loaded = $false
     foreach ($baseUrl in $rawUrls) {
@@ -75,7 +75,7 @@ function Load-SingleModule ([string]$moduleName) {
                 break
             }
         } catch {
-            # ignora e prova l'URL di fallback
+            # Prova con l'URL di fallback
         }
     }
     if (-not $loaded) {
@@ -115,6 +115,7 @@ function Reload-All {
     Start-Sleep -Seconds 1
 }
 
+# Primo caricamento
 Reload-All
 
 # Menu Principale
@@ -151,7 +152,7 @@ do {
         Show-ModuleUtilityMenu
     } else {
         Write-Host "`n --- 4. UTILITY ---" -ForegroundColor DarkGray
-        Write-Host "[R] Ricarica wwmoduli"
+        Write-Host "[R] Ricarica moduli"
         Write-Host "[Q] Esci"
         Write-Host "========================================="
     }
