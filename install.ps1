@@ -1,18 +1,22 @@
-# ==========================================
+# ==============================================================================
 # SCRIPT INSTALLAZIONE SOFTWARE SCUOLA
-# Repository: WorkInstaller
-# ==========================================
+# Repository: https://github.com/SimoGHcoder/WorkInstaller
+# ==============================================================================
 
-# Verifica e richiesta elevazione a Amministratore
+# 1. Forza l'uso di TLS 1.2 per evitare errori di download da GitHub
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+# 2. Richiesta e verifica privilegi di Amministratore
 if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    Write-Host "Riavvio dello script con privilegi di Amministratore..." -ForegroundColor Yellow
     Start-Process powershell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
     exit
 }
 
-# CONFIGURAZIONE REPOSITORY
-$githubUser = "SimoGHcoder" # <--- INSERISCI QUI IL TUO USERNAME GITHUB
-$baseUrl    = "https://raw.githubusercontent.com/$githubUser/WorkInstaller/main"
+# 3. Configurazione indirizzo base del repository Raw
+$baseUrl = "https://raw.githubusercontent.com/SimoGHcoder/WorkInstaller/refs/heads/main"
 
+# Funzione per mostrare il menu principale
 function Show-Menu {
     Clear-Host
     Write-Host "=========================================" -ForegroundColor Cyan
@@ -34,7 +38,7 @@ function Show-Menu {
     Write-Host "========================================="
 }
 
-# Funzione per installazione via Winget
+# Funzione per installazione software da Winget
 function Install-WingetApp ([string]$id) {
     Write-Host "--> Installazione di $id tramite Winget..." -ForegroundColor Yellow
     winget install --id $id --silent --accept-package-agreements --accept-source-agreements
@@ -50,11 +54,12 @@ function Install-CustomApp ([string]$downloadUrl, [string]$fileName, [string]$ar
     Write-Host "--> Esecuzione installazione per $fileName..." -ForegroundColor Yellow
     $process = Start-Process -FilePath $outPath -ArgumentList $arguments -Wait -PassThru
     
-    # Pulizia file temporaneo
+    # Pulizia file temporaneo scaricato
     if (Test-Path $outPath) { Remove-Item $outPath -Force }
     Write-Host "--> Completato." -ForegroundColor Green
 }
 
+# Ciclo principale del menu
 do {
     Show-Menu
     $selection = Read-Host "Seleziona un'opzione"
@@ -65,13 +70,13 @@ do {
         '3' { Install-WingetApp "TheDocumentFoundation.LibreOffice" }
         '4' { Install-WingetApp "7zip.7zip" }
         '5' { 
-            # Esempio file presente nella cartella 'installer' del repo
+            # Esempio file presente dentro la cartella 'installer' su GitHub
             $url = "$baseUrl/installer/ProgrammaCustom.exe"
             Install-CustomApp -downloadUrl $url -fileName "ProgrammaCustom.exe" -arguments "/S"
         }
         '6' { 
-            # Esempio file presente nelle Releases di GitHub o link esterno
-            $url = "https://github.com/$githubUser/WorkInstaller/releases/download/v1.0/SetupSpeciale.msi"
+            # Esempio file presente nelle Releases di GitHub
+            $url = "https://github.com/SimoGHcoder/WorkInstaller/releases/download/v1.0/SetupSpeciale.msi"
             Install-CustomApp -downloadUrl $url -fileName "SetupSpeciale.msi" -arguments "/qn /norestart"
         }
         'A' {
@@ -81,7 +86,6 @@ do {
             Install-WingetApp "TheDocumentFoundation.LibreOffice"
             Install-WingetApp "7zip.7zip"
             
-            # Aggiungi qui gli altri programmi da installare in blocco
             Write-Host "Tutte le installazioni sono state completate!" -ForegroundColor Green
             Start-Sleep -Seconds 3
         }
