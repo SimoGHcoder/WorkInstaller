@@ -65,13 +65,10 @@ function Execute-BatchTask ([string]$downloadUrl, [string]$fileName) {
     
     try {
         Invoke-WebRequest -Uri $downloadUrl -OutFile $outPath -UseBasicParsing -ErrorAction Stop
-        
-        # Sblocca il file scaricato per evitare blocchi da ExecutionPolicy/SmartScreen
         Unblock-File -Path $outPath -ErrorAction SilentlyContinue
 
         Write-Host "--> [Task] Esecuzione di $fileName in corso..." -ForegroundColor Yellow
         
-        # Esecuzione isolata in finestra dedicata per evitare blocchi nei file .cmd / .ps1 interattivi
         if ($fileName.EndsWith(".ps1")) {
             Start-Process powershell.exe `
                 -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$outPath`"" `
@@ -102,7 +99,8 @@ function Execute-BatchTask ([string]$downloadUrl, [string]$fileName) {
 function Load-SingleModule ([string]$moduleName) {
     $loaded = $false
     foreach ($baseUrl in $rawUrls) {
-        $fullUrl = "$baseUrl/modules/$moduleName"
+        # Punta direttamente alla radice del ramo principale su GitHub
+        $fullUrl = "$baseUrl/$moduleName"
         try {
             $code = Invoke-RestMethod -Uri $fullUrl -UseBasicParsing -ErrorAction Stop
             if (-not [string]::IsNullOrWhiteSpace($code)) {
@@ -113,7 +111,7 @@ function Load-SingleModule ([string]$moduleName) {
                 break
             }
         } catch {
-            # Prova con la rotazione o url alternativo
+            # Fallback al secondo URL se il primo fallisce
         }
     }
     if (-not $loaded) {
@@ -167,7 +165,6 @@ do {
     
     $index = 1
 
-    # Passaggio posizionale del riferimento [ref] per il corretto popolamento dei menu
     if (Get-Command Show-ModuleWingetMenu -ErrorAction SilentlyContinue) {
         Show-ModuleWingetMenu ([ref]$index)
     } else {
@@ -200,7 +197,6 @@ do {
 
     $selection = Read-Host "`nSeleziona un'opzione (es. 1, 3, 5 per Winget)"
 
-    # Parsing ed esecuzione degli elementi numerici
     if ($selection -match '\d') {
         $firstNumber = ($selection -split '[\s,]' | Where-Object { $_ -match '^\d+$' } | Select-Object -First 1) -as [int]
         
@@ -208,15 +204,12 @@ do {
             $wCount = if ($global:wingetList) { $global:wingetList.Count } else { 0 }
             $cCount = if ($global:customList) { $global:customList.Count } else { 0 }
 
-            # Selezione Winget
             if ($firstNumber -le $wCount) {
                 Invoke-ModuleWingetAction -inputSelection $selection
             }
-            # Selezione Custom
             elseif ($firstNumber -le ($wCount + $cCount)) {
                 Invoke-ModuleCustomAction -index ($firstNumber - $wCount - 1)
             }
-            # Selezione Tasks
             else {
                 Invoke-ModuleTasksAction -index ($firstNumber - $wCount - $cCount - 1)
             }
@@ -224,7 +217,6 @@ do {
         }
     }
     else {
-        # Gestione opzioni testuali (R, Q, ecc.)
         if ($selection -eq 'R' -or $selection -eq 'r') {
             Reload-All
         } elseif (Get-Command Invoke-ModuleUtilityAction -ErrorAction SilentlyContinue) {
