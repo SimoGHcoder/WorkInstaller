@@ -2,7 +2,7 @@
 # MODULO 4: OPERAZIONI MASSIVE E UTILITY
 # ==============================================================================
 
-function Show-ModuleUtilityMenu {
+function global:Show-ModuleUtilityMenu {
     Write-Host ""
     Write-Host " --- 4. OPERAZIONI MASSIVE E UTILITY ---" -ForegroundColor DarkGray
     Write-Host "[W] Installa TUTTE le app Winget"
@@ -12,7 +12,7 @@ function Show-ModuleUtilityMenu {
     Write-Host "========================================="
 }
 
-function Show-ModuleUtilityMultiSelect {
+function global:Show-ModuleUtilityMultiSelect {
     Clear-Host
     Write-Host "=========================================" -ForegroundColor Cyan
     Write-Host "   INSTALLAZIONE MASSIVA PERSONALIZZATA  " -ForegroundColor Cyan
@@ -67,8 +67,10 @@ function Show-ModuleUtilityMultiSelect {
     Start-Sleep -Seconds 3
 }
 
-function Invoke-ModuleUtilityAction ([string]$code) {
-    switch ($code.ToUpper()) {
+function global:Invoke-ModuleUtilityAction ([string]$code) {
+    if ([string]::IsNullOrWhiteSpace($code)) { return }
+
+    switch ($code.Trim().ToUpper()) {
         'W' {
             Write-Host "Avvio installazione di massa Winget..." -ForegroundColor Green
             foreach ($app in $global:wingetList) { Install-WingetApp -id $app.Id -name $app.Name }
