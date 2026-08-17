@@ -29,7 +29,7 @@ $global:owner   = "SimoGHcoder"
 $global:repo    = "WorkInstaller"
 
 # Download diretto dalla radice del ramo main
-$global:rawBase = "https://raw.githubusercontent.com/$global:owner/$global:repo/main"
+$global:rawBase = "https://raw.githubusercontent.com/$global:owner/$global:repo/blob/main"
 $global:apiBase = "https://api.github.com/repos/$global:owner/$global:repo/contents"
 
 $global:webHeaders = @{
