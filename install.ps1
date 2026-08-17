@@ -1,5 +1,5 @@
 # ==============================================================================
-# WORKINSTALLER - MAIN CONTROLLER (INJECTION GLOBALE DIRETTIVA)
+# WORKINSTALL2ER - MAIN CONTROLLER (INJECTION GLOBALE DIRETTIVA)
 # Repository: https://github.com/SimoGHcoder/WorkInstaller
 # ==============================================================================
 
