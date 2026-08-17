@@ -151,7 +151,7 @@ do {
         Show-ModuleUtilityMenu
     } else {
         Write-Host "`n --- 4. UTILITY ---" -ForegroundColor DarkGray
-        Write-Host "[R] Ricarica moduli"
+        Write-Host "[R] Ricarica wwmoduli"
         Write-Host "[Q] Esci"
         Write-Host "========================================="
     }
