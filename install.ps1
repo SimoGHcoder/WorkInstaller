@@ -1,5 +1,5 @@
 # ==============================================================================
-# WORKINSTALLER - MAIN CONTROLLER (FIX CARICAMENTO MODULI)
+# WORKINSTALLER - MAIN CONTROLLER (FIX SCOPE GLOBALE MODULI)
 # Repository: https://github.com/SimoGHcoder/WorkInstaller
 # ==============================================================================
 
@@ -16,7 +16,6 @@ if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdenti
 $global:owner   = "SimoGHcoder"
 $global:repo    = "WorkInstaller"
 
-# URL Base alternativi (Fallback se il branch principale varia)
 $rawUrls = @(
     "https://raw.githubusercontent.com/$global:owner/$global:repo/main",
     "https://raw.githubusercontent.com/$global:owner/$global:repo/master"
@@ -61,7 +60,7 @@ function Execute-BatchTask ([string]$downloadUrl, [string]$fileName) {
     Write-Host "--> Task completato!" -ForegroundColor Green
 }
 
-# 4. Download ed Esecuzione Moduli nello Scope Globale
+# 4. Download ed Esecuzione nello Scope Globale (. $sb)
 function Load-SingleModule ([string]$moduleName) {
     $loaded = $false
     foreach ($baseUrl in $rawUrls) {
@@ -69,21 +68,23 @@ function Load-SingleModule ([string]$moduleName) {
         try {
             $scriptContent = Invoke-RestMethod -Uri $fullUrl -UseBasicParsing -ErrorAction Stop
             if (-not [string]::IsNullOrWhiteSpace($scriptContent)) {
-                # Inietta ed esegue il codice nel contesto globale
-                $ExecutionContext.InvokeCommand.NewScriptBlock($scriptContent).Invoke()
-                Write-Host " [OK] Modulo $moduleName caricato con successo" -ForegroundColor Green
+                
+                # Creazione dello scriptblock ed esecuzione tramite Dot-Sourcing nel SessionState Globale
+                $sb = [scriptblock]::Create($scriptContent)
+                . $sb
+                
+                Write-Host " [OK] Modulo $moduleName caricato in memoria" -ForegroundColor Green
                 $global:workingRawBase = $baseUrl
                 $loaded = $true
                 break
             }
         } catch {
-            # Prova con l'URL successivo
+            # Tenta con l'URL successivo
         }
     }
     
     if (-not $loaded) {
         Write-Host " [ERRORE] Impossibile scaricare $moduleName da GitHub!" -ForegroundColor Red
-        Write-Host "          Verifica che il file esista nella root del repo." -ForegroundColor DarkGray
     }
 }
 
@@ -104,6 +105,7 @@ function Load-AllModules {
 function Reload-All {
     Load-AllModules
     
+    # Recupera i dati dalle funzioni esportate dai moduli
     if (Get-Command Get-ModuleWingetList -ErrorAction SilentlyContinue) {
         $global:wingetList = Get-ModuleWingetList
     } else { $global:wingetList = @() }
@@ -119,6 +121,7 @@ function Reload-All {
     Start-Sleep -Seconds 1
 }
 
+# Primo caricamento globale
 Reload-All
 
 # 5. Ciclo Menu Principale
@@ -135,7 +138,7 @@ do {
         Show-ModuleWingetMenu -startIndex ([ref]$index)
     } else {
         Write-Host " --- 1. SOFTWARE STANDARD (WINGET) ---" -ForegroundColor DarkGray
-        Write-Host " (Errore: Modulo module-winget.ps1 non caricato)" -ForegroundColor Red
+        Write-Host " (Errore: Modulo module-winget.ps1 non disponibile)" -ForegroundColor Red
     }
 
     # 2. Installer Custom
@@ -143,7 +146,7 @@ do {
         Show-ModuleCustomMenu -startIndex ([ref]$index)
     } else {
         Write-Host "`n --- 2. INSTALLER CUSTOM (INSTALLER/) ---" -ForegroundColor DarkGray
-        Write-Host " (Errore: Modulo module-custom.ps1 non caricato)" -ForegroundColor Red
+        Write-Host " (Errore: Modulo module-custom.ps1 non disponibile)" -ForegroundColor Red
     }
 
     # 3. Operazioni Batch
@@ -151,7 +154,7 @@ do {
         Show-ModuleTasksMenu -startIndex ([ref]$index)
     } else {
         Write-Host "`n --- 3. OPERAZIONI BATCH (TASKS/) ---" -ForegroundColor DarkGray
-        Write-Host " (Errore: Modulo module-tasks.ps1 non caricato)" -ForegroundColor Red
+        Write-Host " (Errore: Modulo module-tasks.ps1 non disponibile)" -ForegroundColor Red
     }
 
     # 4. Operazioni Massive e Utility
