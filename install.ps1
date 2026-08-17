@@ -1,23 +1,29 @@
 # ==============================================================================
-# WORKINSTALLER - MAIN CONTROLLER (FIX SCOPE & DOT-SOURCING)
+# WORKINSTALLER - MAIN CONTROLLER (FIX CARICAMENTO MODULI)
 # Repository: https://github.com/SimoGHcoder/WorkInstaller
 # ==============================================================================
 
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
+# 1. Controllo Privilegi Amministratore
 if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     Write-Host "Riavvio con privilegi di Amministratore..." -ForegroundColor Yellow
     Start-Process powershell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
     exit
 }
 
-# Configurazione globale (URL Raw semplificato per evitare 404)
+# 2. Configurazione Repository GitHub
 $global:owner   = "SimoGHcoder"
 $global:repo    = "WorkInstaller"
-$global:rawBase = "https://raw.githubusercontent.com/$global:owner/$global:repo/main"
+
+# URL Base alternativi (Fallback se il branch principale varia)
+$rawUrls = @(
+    "https://raw.githubusercontent.com/$global:owner/$global:repo/main",
+    "https://raw.githubusercontent.com/$global:owner/$global:repo/master"
+)
 $global:apiBase = "https://api.github.com/repos/$global:owner/$global:repo/contents"
 
-# Funzioni Helper Condivise
+# 3. Funzioni Helper Condivise
 function Get-SilentArgs ([string]$fileName) {
     if ($fileName.EndsWith(".msi")) { return "/qn /norestart" } else { return "/S" }
 }
@@ -55,31 +61,67 @@ function Execute-BatchTask ([string]$downloadUrl, [string]$fileName) {
     Write-Host "--> Task completato!" -ForegroundColor Green
 }
 
-# Caricamento dei moduli tramite Dot-Sourcing per mantenere le funzioni nello Scope Globale
-function Load-Modules {
-    Write-Host "Caricamento moduli da GitHub..." -ForegroundColor Cyan
-    $modules = @("module-winget.ps1", "module-custom.ps1", "module-tasks.ps1", "module-utility.ps1")
-    
-    foreach ($mod in $modules) {
+# 4. Download ed Esecuzione Moduli nello Scope Globale
+function Load-SingleModule ([string]$moduleName) {
+    $loaded = $false
+    foreach ($baseUrl in $rawUrls) {
+        $fullUrl = "$baseUrl/$moduleName"
         try {
-            $scriptCode = Invoke-RestMethod -Uri "$global:rawBase/$mod" -UseBasicParsing -ErrorAction Stop
-            # Il punto prima di [scriptblock] importa le funzioni direttamente nello scope corrente/globale
-            . ([scriptblock]::Create($scriptCode))
+            $scriptContent = Invoke-RestMethod -Uri $fullUrl -UseBasicParsing -ErrorAction Stop
+            if (-not [string]::IsNullOrWhiteSpace($scriptContent)) {
+                # Inietta ed esegue il codice nel contesto globale
+                $ExecutionContext.InvokeCommand.NewScriptBlock($scriptContent).Invoke()
+                Write-Host " [OK] Modulo $moduleName caricato con successo" -ForegroundColor Green
+                $global:workingRawBase = $baseUrl
+                $loaded = $true
+                break
+            }
         } catch {
-            Write-Host "[ERRORE] Impossibile caricare $mod : $_" -ForegroundColor Red
+            # Prova con l'URL successivo
         }
+    }
+    
+    if (-not $loaded) {
+        Write-Host " [ERRORE] Impossibile scaricare $moduleName da GitHub!" -ForegroundColor Red
+        Write-Host "          Verifica che il file esista nella root del repo." -ForegroundColor DarkGray
+    }
+}
+
+function Load-AllModules {
+    Write-Host "Sincronizzazione moduli da GitHub..." -ForegroundColor Cyan
+    Load-SingleModule "module-winget.ps1"
+    Load-SingleModule "module-custom.ps1"
+    Load-SingleModule "module-tasks.ps1"
+    Load-SingleModule "module-utility.ps1"
+    
+    if ($global:workingRawBase) {
+        $global:rawBase = $global:workingRawBase
+    } else {
+        $global:rawBase = $rawUrls[0]
     }
 }
 
 function Reload-All {
-    Load-Modules
-    $global:wingetList = Get-ModuleWingetList
-    $global:customList = Get-ModuleCustomList
-    $global:taskList   = Get-ModuleTasksList
+    Load-AllModules
+    
+    if (Get-Command Get-ModuleWingetList -ErrorAction SilentlyContinue) {
+        $global:wingetList = Get-ModuleWingetList
+    } else { $global:wingetList = @() }
+
+    if (Get-Command Get-ModuleCustomList -ErrorAction SilentlyContinue) {
+        $global:customList = Get-ModuleCustomList
+    } else { $global:customList = @() }
+
+    if (Get-Command Get-ModuleTasksList -ErrorAction SilentlyContinue) {
+        $global:taskList = Get-ModuleTasksList
+    } else { $global:taskList = @() }
+
+    Start-Sleep -Seconds 1
 }
 
 Reload-All
 
+# 5. Ciclo Menu Principale
 do {
     Clear-Host
     Write-Host "=========================================" -ForegroundColor Cyan
@@ -91,21 +133,35 @@ do {
     # 1. Software Winget
     if (Get-Command Show-ModuleWingetMenu -ErrorAction SilentlyContinue) {
         Show-ModuleWingetMenu -startIndex ([ref]$index)
+    } else {
+        Write-Host " --- 1. SOFTWARE STANDARD (WINGET) ---" -ForegroundColor DarkGray
+        Write-Host " (Errore: Modulo module-winget.ps1 non caricato)" -ForegroundColor Red
     }
 
     # 2. Installer Custom
     if (Get-Command Show-ModuleCustomMenu -ErrorAction SilentlyContinue) {
         Show-ModuleCustomMenu -startIndex ([ref]$index)
+    } else {
+        Write-Host "`n --- 2. INSTALLER CUSTOM (INSTALLER/) ---" -ForegroundColor DarkGray
+        Write-Host " (Errore: Modulo module-custom.ps1 non caricato)" -ForegroundColor Red
     }
 
     # 3. Operazioni Batch
     if (Get-Command Show-ModuleTasksMenu -ErrorAction SilentlyContinue) {
         Show-ModuleTasksMenu -startIndex ([ref]$index)
+    } else {
+        Write-Host "`n --- 3. OPERAZIONI BATCH (TASKS/) ---" -ForegroundColor DarkGray
+        Write-Host " (Errore: Modulo module-tasks.ps1 non caricato)" -ForegroundColor Red
     }
 
     # 4. Operazioni Massive e Utility
     if (Get-Command Show-ModuleUtilityMenu -ErrorAction SilentlyContinue) {
         Show-ModuleUtilityMenu
+    } else {
+        Write-Host "`n --- 4. UTILITY ---" -ForegroundColor DarkGray
+        Write-Host "[R] Ricarica moduli"
+        Write-Host "[Q] Esci"
+        Write-Host "========================================="
     }
 
     $selection = Read-Host "Seleziona un'opzione"
@@ -131,6 +187,8 @@ do {
     else {
         if (Get-Command Invoke-ModuleUtilityAction -ErrorAction SilentlyContinue) {
             Invoke-ModuleUtilityAction -code $selection
+        } elseif ($selection -eq 'R' -or $selection -eq 'r') {
+            Reload-All
         }
     }
 
