@@ -33,31 +33,49 @@ function Install-WingetApp ([string]$id, [string]$name) {
 }
 
 function Install-CustomApp ([string]$downloadUrl, [string]$fileName) {
-    $outPath = "$env:TEMP\$fileName"
-    $args = Get-SilentArgs $fileName
+    $tempFolder = "$env:TEMP\WorkInstaller"
+    if (-not (Test-Path $tempFolder)) { New-Item -ItemType Directory -Path $tempFolder -Force | Out-Null }
+    $outPath = Join-Path $tempFolder $fileName
+
     Write-Host "--> [Custom] Download di $fileName..." -ForegroundColor Yellow
     Invoke-WebRequest -Uri $downloadUrl -OutFile $outPath -UseBasicParsing
     
-    Write-Host "--> [Custom] Esecuzione $fileName..." -ForegroundColor Yellow
-    Start-Process -FilePath $outPath -ArgumentList $args -Wait -PassThru
-    if (Test-Path $outPath) { Remove-Item $outPath -Force }
+    Write-Host "--> [Custom] Esecuzione interattiva $fileName..." -ForegroundColor Yellow
+    Start-Process -FilePath $outPath -Wait
+    
+    if (Test-Path $outPath) { Remove-Item $outPath -Force -ErrorAction SilentlyContinue }
     Write-Host "--> Completato!" -ForegroundColor Green
 }
 
 function Execute-BatchTask ([string]$downloadUrl, [string]$fileName) {
-    $outPath = "$env:TEMP\$fileName"
-    Write-Host "--> [Task] Download dello script $fileName..." -ForegroundColor Yellow
-    Invoke-WebRequest -Uri $downloadUrl -OutFile $outPath -UseBasicParsing
+    $tempFolder = "$env:TEMP\WorkInstaller"
+    if (-not (Test-Path $tempFolder)) { New-Item -ItemType Directory -Path $tempFolder -Force | Out-Null }
+    $outPath = Join-Path $tempFolder $fileName
+
+    Write-Host "--> [Task] Download dello script $fileName..." -ForegroundColor Cyan
     
-    Write-Host "--> [Task] Esecuzione in corso..." -ForegroundColor Yellow
-    if ($fileName.EndsWith(".ps1")) {
-        powershell -ExecutionPolicy Bypass -File $outPath
-    } else {
-        cmd /c $outPath
+    try {
+        Invoke-WebRequest -Uri $downloadUrl -OutFile $outPath -UseBasicParsing -ErrorAction Stop
+        
+        # Sblocca il file scaricato per evitare blocchi da ExecutionPolicy/SmartScreen
+        Unblock-File -Path $outPath -ErrorAction SilentlyContinue
+
+        Write-Host "--> [Task] Esecuzione di $fileName in corso..." -ForegroundColor Yellow
+        
+        if ($fileName.EndsWith(".ps1")) {
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$outPath"
+        } else {
+            cmd.exe /c "$outPath"
+        }
+        
+        Write-Host "--> [Task] Esecuzione completata!" -ForegroundColor Green
     }
-    
-    if (Test-Path $outPath) { Remove-Item $outPath -Force }
-    Write-Host "--> Task completato!" -ForegroundColor Green
+    catch {
+        Write-Host " [!] Errore durante l'esecuzione dello script: $_" -ForegroundColor Red
+    }
+    finally {
+        if (Test-Path $outPath) { Remove-Item $outPath -Force -ErrorAction SilentlyContinue }
+    }
 }
 
 # Download ed Esecuzione Moduli
@@ -75,7 +93,7 @@ function Load-SingleModule ([string]$moduleName) {
                 break
             }
         } catch {
-            # Prova con l'URL di fallback
+            # Prova con il fallback
         }
     }
     if (-not $loaded) {
@@ -157,27 +175,34 @@ do {
         Write-Host "========================================="
     }
 
-    $selection = Read-Host "Seleziona un'opzione"
+    $selection = Read-Host "Seleziona un'opzione (es. 1, 3, 5 per Winget)"
 
-    if ($selection -match '^[0-9]+$') {
-        $val = [int]$selection
-        if ($val -ge 1 -and $val -lt $index) {
+    # Se l'input contiene numeri (singoli o multipli separati da spazio/virgola)
+    if ($selection -match '\d') {
+        # Estrae il primo numero valido per determinare la sezione target
+        $firstNumber = ($selection -split '[\s,]' | Where-Object { $_ -match '^\d+$' } | Select-Object -First 1) -as [int]
+        
+        if ($firstNumber -ge 1 -and $firstNumber -lt $index) {
             $wCount = $global:wingetList.Count
             $cCount = $global:customList.Count
 
-            if ($val -le $wCount) {
-                Invoke-ModuleWingetAction -index ($val - 1)
+            # Selezione appartenente alla sezione Winget
+            if ($firstNumber -le $wCount) {
+                Invoke-ModuleWingetAction -inputSelection $selection
             }
-            elseif ($val -le ($wCount + $cCount)) {
-                Invoke-ModuleCustomAction -index ($val - $wCount - 1)
+            # Selezione appartenente alla sezione Custom
+            elseif ($firstNumber -le ($wCount + $cCount)) {
+                Invoke-ModuleCustomAction -index ($firstNumber - $wCount - 1)
             }
+            # Selezione appartenente alla sezione Tasks
             else {
-                Invoke-ModuleTasksAction -index ($val - $wCount - $cCount - 1)
+                Invoke-ModuleTasksAction -index ($firstNumber - $wCount - $cCount - 1)
             }
             Start-Sleep -Seconds 2
         }
     }
     else {
+        # Gestione opzioni testuali (W, M, R, Q...)
         if (Get-Command Invoke-ModuleUtilityAction -ErrorAction SilentlyContinue) {
             Invoke-ModuleUtilityAction -code $selection
         } elseif ($selection -eq 'R' -or $selection -eq 'r') {
