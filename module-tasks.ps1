@@ -1,10 +1,14 @@
+# ==============================================================================
+# MODULO 3: OPERAZIONI BATCH E SCRIPT (TASKS/)
+# ==============================================================================
+
 function global:Get-ModuleTasksList {
     $list = @()
     $url = "$global:apiBase/tasks"
     try {
         $items = Invoke-RestMethod -Uri $url -UseBasicParsing -ErrorAction Stop
         foreach ($item in $items) {
-            # Filtro: controlla che sia un file e che NON sia .gitkeep
+            # Filtro: esclude cartelle e file .gitkeep
             if ($item.type -eq "file" -and $item.name -ne ".gitkeep") {
                 $list += [PSCustomObject]@{
                     Name        = $item.name
@@ -13,7 +17,7 @@ function global:Get-ModuleTasksList {
             }
         }
     } catch {
-        # Cartella vuota o non presente
+        # Cartella vuota o non raggiungibile
     }
     return $list
 }
