@@ -21,7 +21,6 @@ $apiBase  = "https://api.github.com/repos/$owner/$repo/contents"
 
 # --- FUNZIONI DI RECUPERO MODULI ---
 
-# Modulo 1: Lettura App Winget da winget-apps.txt
 function Get-WingetApps {
     try {
         $content = Invoke-RestMethod -Uri "$rawBase/winget-apps.txt" -ErrorAction Stop
@@ -29,21 +28,24 @@ function Get-WingetApps {
         $apps = @()
         foreach ($line in $lines) {
             $parts = $line.Split('|')
-            $apps += [PSCustomObject]@{ Name = $parts[0].Trim(); Id = $parts[1].Trim() }
+            $apps += [PSCustomObject]@{ Name = $parts[0].Trim(); Id = $parts[1].Trim(); Type = "Winget" }
         }
         return $apps
     } catch { return @() }
 }
 
-# Modulo 2: Scansione Eseguibili Custom (.exe / .msi)
 function Get-CustomInstallers {
     try {
         $res = Invoke-RestMethod -Uri "$apiBase/installer" -Method Get -Headers @{ "User-Agent" = "PowerShell" } -ErrorAction Stop
-        return $res | Where-Object { $_.type -eq "file" -and ($_.name -like "*.exe" -or $_.name -like "*.msi") }
+        $files = $res | Where-Object { $_.type -eq "file" -and ($_.name -like "*.exe" -or $_.name -like "*.msi") }
+        $installers = @()
+        foreach ($f in $files) {
+            $installers += [PSCustomObject]@{ Name = $f.name; DownloadUrl = "$rawBase/installer/$($f.name)"; Type = "Custom" }
+        }
+        return $installers
     } catch { return @() }
 }
 
-# Modulo 3: Scansione Script di Operazioni Batch (.ps1 / .bat)
 function Get-BatchTasks {
     try {
         $res = Invoke-RestMethod -Uri "$apiBase/tasks" -Method Get -Headers @{ "User-Agent" = "PowerShell" } -ErrorAction Stop
@@ -99,6 +101,64 @@ function Reload-AllModules {
     $global:taskList    = Get-BatchTasks
 }
 
+# Sub-Menu per Selezione Personalizzata di Software
+function Show-CustomMultiSelect {
+    Clear-Host
+    Write-Host "=========================================" -ForegroundColor Cyan
+    Write-Host "   INSTALLAZIONE MASSIVA PERSONALIZZATA  " -ForegroundColor Cyan
+    Write-Host "=========================================" -ForegroundColor Cyan
+    
+    $allSoftware = @()
+    $idx = 1
+
+    Write-Host "--- SOFTWARE DISPONIBILI ---" -ForegroundColor DarkGray
+    foreach ($app in $wingetList) {
+        Write-Host "[$idx] [Winget] $($app.Name)"
+        $allSoftware += [PSCustomObject]@{ Number = $idx; Object = $app; Type = "Winget" }
+        $idx++
+    }
+    foreach ($file in $customList) {
+        Write-Host "[$idx] [Custom] $($file.Name)"
+        $allSoftware += [PSCustomObject]@{ Number = $idx; Object = $file; Type = "Custom" }
+        $idx++
+    }
+
+    if ($allSoftware.Count -eq 0) {
+        Write-Host "Nessun software disponibile per l'installazione." -ForegroundColor Red
+        Start-Sleep -Seconds 2
+        return
+    }
+
+    Write-Host ""
+    Write-Host "Inserisci i numeri dei software da installare separati da virgola (es: 1,3,5)" -ForegroundColor Yellow
+    $inputRaw = Read-Host "Selezione (lascia vuoto per annullare)"
+
+    if ([string]::IsNullOrWhiteSpace($inputRaw)) { return }
+
+    $selectedIndices = $inputRaw -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -match '^[0-9]+$' } | ForEach-Object { [int]$_ }
+
+    Write-Host ""
+    Write-Host "Avvio installazione dei software selezionati..." -ForegroundColor Green
+
+    foreach ($num in $selectedIndices) {
+        $item = $allSoftware | Where-Object { $_.Number -eq $num }
+        if ($item) {
+            if ($item.Type -eq "Winget") {
+                Install-WingetApp -id $item.Object.Id -name $item.Object.Name
+            }
+            elseif ($item.Type -eq "Custom") {
+                Install-CustomApp -downloadUrl $item.Object.DownloadUrl -fileName $item.Object.Name
+            }
+        } else {
+            Write-Host "Numero $num non valido, ignorato." -ForegroundColor Red
+        }
+    }
+
+    Write-Host ""
+    Write-Host "Tutte le installazioni selezionate sono state completate!" -ForegroundColor Green
+    Start-Sleep -Seconds 3
+}
+
 Reload-AllModules
 
 do {
@@ -127,7 +187,7 @@ do {
         Write-Host " (Nessun file .exe/.msi nella cartella 'installer')" -ForegroundColor Gray
     } else {
         foreach ($file in $customList) {
-            Write-Host "[$index] $($file.name)"
+            Write-Host "[$index] $($file.Name)"
             $index++
         }
     }
@@ -145,8 +205,9 @@ do {
     }
 
     Write-Host ""
-    Write-Host " --- AZIONI DI SISTEMA ---" -ForegroundColor DarkGray
-    Write-Host "[A] Esegui INSTALLAZIONE COMPLETA (Tutti i software)"
+    Write-Host " --- OPERAZIONI MASSIVE E UTILITY ---" -ForegroundColor DarkGray
+    Write-Host "[W] Installa TUTTE le app Winget"
+    Write-Host "[M] SELEZIONE MULTIPLA PERSONALIZZATA (Scegli cosa installare)"
     Write-Host "[R] Ricarica moduli da GitHub"
     Write-Host "[Q] Esci"
     Write-Host "========================================="
@@ -156,37 +217,35 @@ do {
     if ($selection -match '^[0-9]+$') {
         $val = [int]$selection
         
-        # Gestione selezione dinamica
         if ($val -ge 1 -and $val -lt $index) {
             $wCount = $wingetList.Count
             $cCount = $customList.Count
 
             if ($val -le $wCount) {
-                # Cliccata App Winget
                 $app = $wingetList[$val - 1]
                 Install-WingetApp -id $app.Id -name $app.Name
                 Start-Sleep -Seconds 2
             }
             elseif ($val -le ($wCount + $cCount)) {
-                # Cliccato Installer Custom
                 $file = $customList[$val - $wCount - 1]
-                Install-CustomApp -downloadUrl "$rawBase/installer/$($file.name)" -fileName $file.name
+                Install-CustomApp -downloadUrl $file.DownloadUrl -fileName $file.Name
                 Start-Sleep -Seconds 2
             }
             else {
-                # Cliccata Operazione Batch / Task
                 $task = $taskList[$val - $wCount - $cCount - 1]
                 Execute-BatchTask -downloadUrl "$rawBase/tasks/$($task.name)" -fileName $task.name
                 Start-Sleep -Seconds 2
             }
         }
     }
-    elseif ($selection -eq 'A' -or $selection -eq 'a') {
-        Write-Host "Avvio installazione di massa..." -ForegroundColor Green
+    elseif ($selection -eq 'W' -or $selection -eq 'w') {
+        Write-Host "Avvio installazione di massa (tutti i software Winget)..." -ForegroundColor Green
         foreach ($app in $wingetList) { Install-WingetApp -id $app.Id -name $app.Name }
-        foreach ($file in $customList) { Install-CustomApp -downloadUrl "$rawBase/installer/$($file.name)" -fileName $file.name }
-        Write-Host "Installazioni completate!" -ForegroundColor Green
+        Write-Host "Installazioni Winget completate!" -ForegroundColor Green
         Start-Sleep -Seconds 3
+    }
+    elseif ($selection -eq 'M' -or $selection -eq 'm') {
+        Show-CustomMultiSelect
     }
     elseif ($selection -eq 'R' -or $selection -eq 'r') {
         Reload-AllModules
