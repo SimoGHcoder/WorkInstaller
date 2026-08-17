@@ -1,24 +1,52 @@
 # ==============================================================================
-# MODULO 1: GESTIONE APP WINGET (INSTALLAZIONE AUTOMATICA SILENTE)
+# MODULO 1: GESTIONE APP WINGET (LETTURA DA WINGET-APPS.TXT)
 # ==============================================================================
 
 function global:Get-ModuleWingetList {
-    # Lista di app Winget standard predefinite per l'ambiente scolastico/lab
-    return @(
-        [PSCustomObject]@{ Id = "7zip.7zip"; Name = "7-Zip" },
-        [PSCustomObject]@{ Id = "VideoLAN.VLC"; Name = "VLC Media Player" },
-        [PSCustomObject]@{ Id = "Google.Chrome"; Name = "Google Chrome" },
-        [PSCustomObject]@{ Id = "Mozilla.Firefox"; Name = "Mozilla Firefox" },
-        [PSCustomObject]@{ Id = "Foxit.PDFReader"; Name = "Foxit PDF Reader" },
-        [PSCustomObject]@{ Id = "Notepad++.Notepad++"; Name = "Notepad++" },
-        [PSCustomObject]@{ Id = "Oracle.JavaRuntimeEnvironment"; Name = "Java JRE" }
-    )
+    $list = @()
+    $url = "$global:rawBase/winget-apps.txt"
+    
+    try {
+        # Scarica il file winget-apps.txt dal repository GitHub
+        $content = Invoke-RestMethod -Uri $url -UseBasicParsing -ErrorAction Stop
+        
+        # Divide il contenuto riga per riga
+        $lines = $content -split "`r?\n"
+        
+        foreach ($line in $lines) {
+            $trimmed = $line.Trim()
+            
+            # Ignora righe vuote o commenti
+            if ([string]::IsNullOrWhiteSpace($trimmed) -or $trimmed.StartsWith("#")) {
+                continue
+            }
+            
+            # Parsing "ID | Nome" oppure solo "ID"
+            if ($trimmed -like "*|*") {
+                $parts = $trimmed -split "\|"
+                $appId = $parts[0].Trim()
+                $appName = $parts[1].Trim()
+            } else {
+                $appId = $trimmed
+                $appName = $trimmed
+            }
+            
+            $list += [PSCustomObject]@{
+                Id   = $appId
+                Name = $appName
+            }
+        }
+    } catch {
+        Write-Host " [!] Impossibile scaricare o leggere winget-apps.txt da GitHub." -ForegroundColor Red
+    }
+    
+    return $list
 }
 
 function global:Show-ModuleWingetMenu ([ref]$startIndex) {
     Write-Host " --- 1. SOFTWARE STANDARD WINGET (SILENT) ---" -ForegroundColor DarkGray
     if ($global:wingetList.Count -eq 0) {
-        Write-Host " (Nessuna app Winget configurata)" -ForegroundColor Yellow
+        Write-Host " (Nessuna app presente in winget-apps.txt o file non trovato)" -ForegroundColor Yellow
         return
     }
     foreach ($item in $global:wingetList) {
@@ -41,9 +69,9 @@ function global:Invoke-ModuleWingetAction ([string]$inputSelection) {
     foreach ($idx in $indexes) {
         if ($idx -ge 0 -and $idx -lt $global:wingetList.Count) {
             $app = $global:wingetList[$idx]
-            Write-Host "`n --> [Winget Silent] Avvio installazione di: $($app.Name)..." -ForegroundColor Cyan
+            Write-Host "`n --> [Winget Silent] Avvio installazione di: $($app.Name) ($($app.Id))..." -ForegroundColor Cyan
             
-            # Esecuzione silente senza interazione
+            # Esecuzione silente automatica
             winget install --id $app.Id --silent --accept-source-agreements --accept-package-agreements
             
             if ($LASTEXITCODE -eq 0) {
