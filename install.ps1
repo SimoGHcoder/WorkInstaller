@@ -5,14 +5,21 @@
 
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-# Elevazione Amministratore
+# ------------------------------------------------------------------------------
+# 1. ELEVAZIONE PRIVILEGI AMMINISTRATORE
+# ------------------------------------------------------------------------------
 if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     Write-Host "Riavvio con privilegi di Amministratore..." -ForegroundColor Yellow
     Start-Process powershell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
     exit
 }
 
-# Configurazione GitHub
+# Imposta la cartella di lavoro temporanea
+Set-Location -Path $env:TEMP
+
+# ------------------------------------------------------------------------------
+# 2. CONFIGURAZIONE GITHUB & VARIABILI GLOBALI
+# ------------------------------------------------------------------------------
 $global:owner   = "SimoGHcoder"
 $global:repo    = "WorkInstaller"
 
@@ -22,7 +29,9 @@ $rawUrls = @(
 )
 $global:apiBase = "https://api.github.com/repos/$global:owner/$global:repo/contents"
 
-# Funzioni Helper Condivise
+# ------------------------------------------------------------------------------
+# 3. FUNZIONI HELPER CONDIVISE
+# ------------------------------------------------------------------------------
 function Get-SilentArgs ([string]$fileName) {
     if ($fileName.EndsWith(".msi")) { return "/qn /norestart" } else { return "/S" }
 }
@@ -62,10 +71,19 @@ function Execute-BatchTask ([string]$downloadUrl, [string]$fileName) {
 
         Write-Host "--> [Task] Esecuzione di $fileName in corso..." -ForegroundColor Yellow
         
+        # Esecuzione isolata in finestra dedicata per evitare blocchi nei file .cmd / .ps1 interattivi
         if ($fileName.EndsWith(".ps1")) {
-            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$outPath"
+            Start-Process powershell.exe `
+                -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$outPath`"" `
+                -WorkingDirectory $tempFolder `
+                -NoNewWindow:$false `
+                -Wait
         } else {
-            cmd.exe /c "$outPath"
+            Start-Process "cmd.exe" `
+                -ArgumentList "/c `"$outPath`"" `
+                -WorkingDirectory $tempFolder `
+                -NoNewWindow:$false `
+                -Wait
         }
         
         Write-Host "--> [Task] Esecuzione completata!" -ForegroundColor Green
@@ -78,11 +96,13 @@ function Execute-BatchTask ([string]$downloadUrl, [string]$fileName) {
     }
 }
 
-# Download ed Esecuzione Moduli
+# ------------------------------------------------------------------------------
+# 4. CARICAMENTO E GESTIONE MODULI
+# ------------------------------------------------------------------------------
 function Load-SingleModule ([string]$moduleName) {
     $loaded = $false
     foreach ($baseUrl in $rawUrls) {
-        $fullUrl = "$baseUrl/$moduleName"
+        $fullUrl = "$baseUrl/modules/$moduleName"
         try {
             $code = Invoke-RestMethod -Uri $fullUrl -UseBasicParsing -ErrorAction Stop
             if (-not [string]::IsNullOrWhiteSpace($code)) {
@@ -93,7 +113,7 @@ function Load-SingleModule ([string]$moduleName) {
                 break
             }
         } catch {
-            # Prova con il fallback
+            # Prova con la rotazione o url alternativo
         }
     }
     if (-not $loaded) {
@@ -133,10 +153,12 @@ function Reload-All {
     Start-Sleep -Seconds 1
 }
 
-# Primo caricamento
+# Primo caricamento all'avvio
 Reload-All
 
-# Menu Principale
+# ------------------------------------------------------------------------------
+# 5. CICLO PRINCIPALE DEL MENU
+# ------------------------------------------------------------------------------
 do {
     Clear-Host
     Write-Host "=========================================" -ForegroundColor Cyan
@@ -145,22 +167,23 @@ do {
     
     $index = 1
 
+    # Passaggio posizionale del riferimento [ref] per il corretto popolamento dei menu
     if (Get-Command Show-ModuleWingetMenu -ErrorAction SilentlyContinue) {
-        Show-ModuleWingetMenu -startIndex ([ref]$index)
+        Show-ModuleWingetMenu ([ref]$index)
     } else {
         Write-Host " --- 1. SOFTWARE STANDARD (WINGET) ---" -ForegroundColor DarkGray
         Write-Host " (Errore: Modulo module-winget.ps1 non disponibile)" -ForegroundColor Red
     }
 
     if (Get-Command Show-ModuleCustomMenu -ErrorAction SilentlyContinue) {
-        Show-ModuleCustomMenu -startIndex ([ref]$index)
+        Show-ModuleCustomMenu ([ref]$index)
     } else {
         Write-Host "`n --- 2. INSTALLER CUSTOM (INSTALLER/) ---" -ForegroundColor DarkGray
         Write-Host " (Errore: Modulo module-custom.ps1 non disponibile)" -ForegroundColor Red
     }
 
     if (Get-Command Show-ModuleTasksMenu -ErrorAction SilentlyContinue) {
-        Show-ModuleTasksMenu -startIndex ([ref]$index)
+        Show-ModuleTasksMenu ([ref]$index)
     } else {
         Write-Host "`n --- 3. OPERAZIONI BATCH (TASKS/) ---" -ForegroundColor DarkGray
         Write-Host " (Errore: Modulo module-tasks.ps1 non disponibile)" -ForegroundColor Red
@@ -170,31 +193,30 @@ do {
         Show-ModuleUtilityMenu
     } else {
         Write-Host "`n --- 4. UTILITY ---" -ForegroundColor DarkGray
-        Write-Host "[R] Ricarica moduli"
-        Write-Host "[Q] Esci"
+        Write-Host " [R] Ricarica moduli"
+        Write-Host " [Q] Esci"
         Write-Host "========================================="
     }
 
-    $selection = Read-Host "Seleziona un'opzione (es. 1, 3, 5 per Winget)"
+    $selection = Read-Host "`nSeleziona un'opzione (es. 1, 3, 5 per Winget)"
 
-    # Se l'input contiene numeri (singoli o multipli separati da spazio/virgola)
+    # Parsing ed esecuzione degli elementi numerici
     if ($selection -match '\d') {
-        # Estrae il primo numero valido per determinare la sezione target
         $firstNumber = ($selection -split '[\s,]' | Where-Object { $_ -match '^\d+$' } | Select-Object -First 1) -as [int]
         
         if ($firstNumber -ge 1 -and $firstNumber -lt $index) {
-            $wCount = $global:wingetList.Count
-            $cCount = $global:customList.Count
+            $wCount = if ($global:wingetList) { $global:wingetList.Count } else { 0 }
+            $cCount = if ($global:customList) { $global:customList.Count } else { 0 }
 
-            # Selezione appartenente alla sezione Winget
+            # Selezione Winget
             if ($firstNumber -le $wCount) {
                 Invoke-ModuleWingetAction -inputSelection $selection
             }
-            # Selezione appartenente alla sezione Custom
+            # Selezione Custom
             elseif ($firstNumber -le ($wCount + $cCount)) {
                 Invoke-ModuleCustomAction -index ($firstNumber - $wCount - 1)
             }
-            # Selezione appartenente alla sezione Tasks
+            # Selezione Tasks
             else {
                 Invoke-ModuleTasksAction -index ($firstNumber - $wCount - $cCount - 1)
             }
@@ -202,11 +224,11 @@ do {
         }
     }
     else {
-        # Gestione opzioni testuali (W, M, R, Q...)
-        if (Get-Command Invoke-ModuleUtilityAction -ErrorAction SilentlyContinue) {
-            Invoke-ModuleUtilityAction -code $selection
-        } elseif ($selection -eq 'R' -or $selection -eq 'r') {
+        # Gestione opzioni testuali (R, Q, ecc.)
+        if ($selection -eq 'R' -or $selection -eq 'r') {
             Reload-All
+        } elseif (Get-Command Invoke-ModuleUtilityAction -ErrorAction SilentlyContinue) {
+            Invoke-ModuleUtilityAction -code $selection
         }
     }
 
