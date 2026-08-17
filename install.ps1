@@ -1,8 +1,3 @@
-Se i moduli si trovano direttamente nella radice del ramo `main` (senza la cartella `modules/`), la chiamata a `$baseUrl/modules/$moduleName` falliva restituendo 404.
-
-Ecco il file **`install.ps1`** completo e pulito, impostato per scaricare i moduli **esclusivamente dalla radice del ramo `main**` e con tutte le correzioni per l'esecuzione dei task in console dedicata e il passaggio corretto dei parametri di riferimento `[ref]`:
-
-```powershell
 # ==============================================================================
 # WORKINSTALLER - MAIN CONTROLLER
 # Repository: https://github.com/SimoGHcoder/WorkInstaller
@@ -28,8 +23,8 @@ Set-Location -Path $env:TEMP
 $global:owner   = "SimoGHcoder"
 $global:repo    = "WorkInstaller"
 
-# Download diretto dalla radice del ramo main
-$global:rawBase = "https://raw.githubusercontent.com/$global:owner/$global:repo/blob/main"
+# L'URL 'raw.githubusercontent.com' è l'unico che restituisce il codice puro anziché la pagina HTML di GitHub
+$global:rawBase = "https://raw.githubusercontent.com/$global:owner/$global:repo/main"
 $global:apiBase = "https://api.github.com/repos/$global:owner/$global:repo/contents"
 
 $global:webHeaders = @{
@@ -104,16 +99,21 @@ function Execute-BatchTask ([string]$downloadUrl, [string]$fileName) {
 # 4. CARICAMENTO E GESTIONE MODULI DALLA RADICE
 # ------------------------------------------------------------------------------
 function Load-SingleModule ([string]$moduleName) {
-    # Punta direttamente alla radice del repo
     $fullUrl = "$global:rawBase/$moduleName"
     try {
         $code = Invoke-RestMethod -Uri $fullUrl -Headers $global:webHeaders -UseBasicParsing -ErrorAction Stop
         if (-not [string]::IsNullOrWhiteSpace($code)) {
+            # Verifica che il codice scaricato non contenga HTML
+            if ($code -match "^\s*<!DOCTYPE html>") {
+                Write-Host " [ERRORE] $moduleName ha restituito una pagina HTML invece dello script PowerShell." -ForegroundColor Red
+                return
+            }
             Invoke-Expression $code
             Write-Host " [OK] Modulo $moduleName caricato" -ForegroundColor Green
         }
     } catch {
-        Write-Host " [ERRORE] Impossibile caricare $moduleName da $fullUrl" -ForegroundColor Red
+        Write-Host " [ERRORE DI SINTASSI O DOWNLOAD] Impossibile eseguire $moduleName :" -ForegroundColor Red
+        Write-Host " $_" -ForegroundColor Red
     }
 }
 
@@ -157,7 +157,6 @@ do {
     
     $index = 1
 
-    # Invocazione dei menu tramite parametro posizionale del riferimento [ref]
     if (Get-Command Show-ModuleWingetMenu -ErrorAction SilentlyContinue) {
         Show-ModuleWingetMenu ([ref]$index)
     } else {
@@ -218,5 +217,3 @@ do {
     }
 
 } until ($selection -eq 'Q' -or $selection -eq 'q')
-
-```
