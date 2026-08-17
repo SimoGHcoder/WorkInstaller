@@ -1,5 +1,5 @@
 # ==============================================================================
-# WORKINSTALLER - MAIN CONTROLLER (FIX SCOPE GLOBALE MODULI)
+# WORKINSTALLER - MAIN CONTROLLER (FIX DEFINITIVO CARICAMENTO MODULI)
 # Repository: https://github.com/SimoGHcoder/WorkInstaller
 # ==============================================================================
 
@@ -21,6 +21,10 @@ $rawUrls = @(
     "https://raw.githubusercontent.com/$global:owner/$global:repo/master"
 )
 $global:apiBase = "https://api.github.com/repos/$global:owner/$global:repo/contents"
+
+# Cartella temporanea locale per i moduli
+$moduleCacheDir = Join-Path $env:TEMP "WorkInstaller_Modules"
+if (-not (Test-Path $moduleCacheDir)) { New-Item -ItemType Directory -Path $moduleCacheDir -Force | Out-Null }
 
 # 3. Funzioni Helper Condivise
 function Get-SilentArgs ([string]$fileName) {
@@ -60,20 +64,22 @@ function Execute-BatchTask ([string]$downloadUrl, [string]$fileName) {
     Write-Host "--> Task completato!" -ForegroundColor Green
 }
 
-# 4. Download ed Esecuzione nello Scope Globale (. $sb)
+# 4. Download Locale + Dot-Sourcing Reale
 function Load-SingleModule ([string]$moduleName) {
     $loaded = $false
+    $localFilePath = Join-Path $moduleCacheDir $moduleName
+
     foreach ($baseUrl in $rawUrls) {
         $fullUrl = "$baseUrl/$moduleName"
         try {
-            $scriptContent = Invoke-RestMethod -Uri $fullUrl -UseBasicParsing -ErrorAction Stop
-            if (-not [string]::IsNullOrWhiteSpace($scriptContent)) {
+            # Download del file .ps1 nella cache temporanea
+            Invoke-WebRequest -Uri $fullUrl -OutFile $localFilePath -UseBasicParsing -ErrorAction Stop
+            
+            if (Test-Path $localFilePath) {
+                # Dot-sourcing diretto del file fisico per registrare le funzioni
+                . $localFilePath
                 
-                # Creazione dello scriptblock ed esecuzione tramite Dot-Sourcing nel SessionState Globale
-                $sb = [scriptblock]::Create($scriptContent)
-                . $sb
-                
-                Write-Host " [OK] Modulo $moduleName caricato in memoria" -ForegroundColor Green
+                Write-Host " [OK] Modulo $moduleName scaricato e registrato" -ForegroundColor Green
                 $global:workingRawBase = $baseUrl
                 $loaded = $true
                 break
@@ -121,7 +127,7 @@ function Reload-All {
     Start-Sleep -Seconds 1
 }
 
-# Primo caricamento globale
+# Caricamento iniziale
 Reload-All
 
 # 5. Ciclo Menu Principale
