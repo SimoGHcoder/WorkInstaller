@@ -1,5 +1,5 @@
 # ==============================================================================
-# WORKINSTALLER - MAIN CONTROLLER
+# WORKINSTALLER - MAIN CONTROLLER (FIX SCOPE & DOT-SOURCING)
 # Repository: https://github.com/SimoGHcoder/WorkInstaller
 # ==============================================================================
 
@@ -11,10 +11,10 @@ if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdenti
     exit
 }
 
-# Configurazione globale
+# Configurazione globale (URL Raw semplificato per evitare 404)
 $global:owner   = "SimoGHcoder"
 $global:repo    = "WorkInstaller"
-$global:rawBase = "https://raw.githubusercontent.com/$global:owner/$global:repo/refs/heads/main"
+$global:rawBase = "https://raw.githubusercontent.com/$global:owner/$global:repo/main"
 $global:apiBase = "https://api.github.com/repos/$global:owner/$global:repo/contents"
 
 # Funzioni Helper Condivise
@@ -55,13 +55,20 @@ function Execute-BatchTask ([string]$downloadUrl, [string]$fileName) {
     Write-Host "--> Task completato!" -ForegroundColor Green
 }
 
-# Inclusione dei 4 script di modulo
+# Caricamento dei moduli tramite Dot-Sourcing per mantenere le funzioni nello Scope Globale
 function Load-Modules {
     Write-Host "Caricamento moduli da GitHub..." -ForegroundColor Cyan
-    Invoke-Expression (Invoke-RestMethod -Uri "$global:rawBase/module-winget.ps1" -UseBasicParsing)
-    Invoke-Expression (Invoke-RestMethod -Uri "$global:rawBase/module-custom.ps1" -UseBasicParsing)
-    Invoke-Expression (Invoke-RestMethod -Uri "$global:rawBase/module-tasks.ps1" -UseBasicParsing)
-    Invoke-Expression (Invoke-RestMethod -Uri "$global:rawBase/module-utility.ps1" -UseBasicParsing)
+    $modules = @("module-winget.ps1", "module-custom.ps1", "module-tasks.ps1", "module-utility.ps1")
+    
+    foreach ($mod in $modules) {
+        try {
+            $scriptCode = Invoke-RestMethod -Uri "$global:rawBase/$mod" -UseBasicParsing -ErrorAction Stop
+            # Il punto prima di [scriptblock] importa le funzioni direttamente nello scope corrente/globale
+            . ([scriptblock]::Create($scriptCode))
+        } catch {
+            Write-Host "[ERRORE] Impossibile caricare $mod : $_" -ForegroundColor Red
+        }
+    }
 }
 
 function Reload-All {
@@ -82,16 +89,24 @@ do {
     $index = 1
 
     # 1. Software Winget
-    Show-ModuleWingetMenu -startIndex ([ref]$index)
+    if (Get-Command Show-ModuleWingetMenu -ErrorAction SilentlyContinue) {
+        Show-ModuleWingetMenu -startIndex ([ref]$index)
+    }
 
     # 2. Installer Custom
-    Show-ModuleCustomMenu -startIndex ([ref]$index)
+    if (Get-Command Show-ModuleCustomMenu -ErrorAction SilentlyContinue) {
+        Show-ModuleCustomMenu -startIndex ([ref]$index)
+    }
 
     # 3. Operazioni Batch
-    Show-ModuleTasksMenu -startIndex ([ref]$index)
+    if (Get-Command Show-ModuleTasksMenu -ErrorAction SilentlyContinue) {
+        Show-ModuleTasksMenu -startIndex ([ref]$index)
+    }
 
     # 4. Operazioni Massive e Utility
-    Show-ModuleUtilityMenu
+    if (Get-Command Show-ModuleUtilityMenu -ErrorAction SilentlyContinue) {
+        Show-ModuleUtilityMenu
+    }
 
     $selection = Read-Host "Seleziona un'opzione"
 
@@ -114,7 +129,9 @@ do {
         }
     }
     else {
-        Invoke-ModuleUtilityAction -code $selection
+        if (Get-Command Invoke-ModuleUtilityAction -ErrorAction SilentlyContinue) {
+            Invoke-ModuleUtilityAction -code $selection
+        }
     }
 
 } until ($selection -eq 'Q' -or $selection -eq 'q')
