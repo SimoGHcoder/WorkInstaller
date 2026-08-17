@@ -5,34 +5,24 @@
 
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-# ------------------------------------------------------------------------------
-# 1. ELEVAZIONE PRIVILEGI AMMINISTRATORE
-# ------------------------------------------------------------------------------
+# Elevazione Amministratore
 if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     Write-Host "Riavvio con privilegi di Amministratore..." -ForegroundColor Yellow
     Start-Process powershell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
     exit
 }
 
-# Imposta la cartella di lavoro temporanea
-Set-Location -Path $env:TEMP
-
-# ------------------------------------------------------------------------------
-# 2. CONFIGURAZIONE GITHUB & VARIABILI GLOBALI
-# ------------------------------------------------------------------------------
+# Configurazione GitHub
 $global:owner   = "SimoGHcoder"
 $global:repo    = "WorkInstaller"
 
-$global:rawBase = "https://raw.githubusercontent.com/$global:owner/$global:repo/main"
+$rawUrls = @(
+    "https://raw.githubusercontent.com/$global:owner/$global:repo/main",
+    "https://raw.githubusercontent.com/$global:owner/$global:repo/master"
+)
 $global:apiBase = "https://api.github.com/repos/$global:owner/$global:repo/contents"
 
-$global:webHeaders = @{
-    "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) PowerShell/WorkInstaller"
-}
-
-# ------------------------------------------------------------------------------
-# 3. FUNZIONI HELPER CONDIVISE
-# ------------------------------------------------------------------------------
+# Funzioni Helper Condivise
 function Get-SilentArgs ([string]$fileName) {
     if ($fileName.EndsWith(".msi")) { return "/qn /norestart" } else { return "/S" }
 }
@@ -48,7 +38,7 @@ function Install-CustomApp ([string]$downloadUrl, [string]$fileName) {
     $outPath = Join-Path $tempFolder $fileName
 
     Write-Host "--> [Custom] Download di $fileName..." -ForegroundColor Yellow
-    Invoke-WebRequest -Uri $downloadUrl -Headers $global:webHeaders -OutFile $outPath -UseBasicParsing
+    Invoke-WebRequest -Uri $downloadUrl -OutFile $outPath -UseBasicParsing
     
     Write-Host "--> [Custom] Esecuzione interattiva $fileName..." -ForegroundColor Yellow
     Start-Process -FilePath $outPath -Wait
@@ -65,23 +55,17 @@ function Execute-BatchTask ([string]$downloadUrl, [string]$fileName) {
     Write-Host "--> [Task] Download dello script $fileName..." -ForegroundColor Cyan
     
     try {
-        Invoke-WebRequest -Uri $downloadUrl -Headers $global:webHeaders -OutFile $outPath -UseBasicParsing -ErrorAction Stop
+        Invoke-WebRequest -Uri $downloadUrl -OutFile $outPath -UseBasicParsing -ErrorAction Stop
+        
+        # Sblocca il file scaricato per evitare blocchi da ExecutionPolicy/SmartScreen
         Unblock-File -Path $outPath -ErrorAction SilentlyContinue
 
         Write-Host "--> [Task] Esecuzione di $fileName in corso..." -ForegroundColor Yellow
         
         if ($fileName.EndsWith(".ps1")) {
-            Start-Process powershell.exe `
-                -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$outPath`"" `
-                -WorkingDirectory $tempFolder `
-                -NoNewWindow:$false `
-                -Wait
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$outPath"
         } else {
-            Start-Process "cmd.exe" `
-                -ArgumentList "/c `"$outPath`"" `
-                -WorkingDirectory $tempFolder `
-                -NoNewWindow:$false `
-                -Wait
+            cmd.exe /c "$outPath"
         }
         
         Write-Host "--> [Task] Esecuzione completata!" -ForegroundColor Green
@@ -94,39 +78,26 @@ function Execute-BatchTask ([string]$downloadUrl, [string]$fileName) {
     }
 }
 
-# ------------------------------------------------------------------------------
-# 4. CARICAMENTO CON VERIFICA SINTATTICA (AST PARSER)
-# ------------------------------------------------------------------------------
+# Download ed Esecuzione Moduli
 function Load-SingleModule ([string]$moduleName) {
-    $fullUrl = "$global:rawBase/$moduleName"
-    try {
-        $code = Invoke-RestMethod -Uri $fullUrl -Headers $global:webHeaders -UseBasicParsing -ErrorAction Stop
-        
-        if ([string]::IsNullOrWhiteSpace($code)) {
-            Write-Host " [ERRORE] $moduleName è vuoto." -ForegroundColor Red
-            return
-        }
-
-        # Validazione sintattica con PowerShell AST
-        $errors = $null
-        $tokens = $null
-        $null = [System.Management.Automation.Language.Parser]::ParseInput($code, [ref]$tokens, [ref]$errors)
-
-        if ($errors.Count -gt 0) {
-            Write-Host " [ERRORE SINTASSI] Trovato errore nel file su GitHub: $moduleName" -ForegroundColor Red
-            foreach ($err in $errors) {
-                Write-Host "   -> Riga $($err.Extent.StartLineNumber), Colonna $($err.Extent.StartColumnNumber): $($err.Message)" -ForegroundColor Yellow
+    $loaded = $false
+    foreach ($baseUrl in $rawUrls) {
+        $fullUrl = "$baseUrl/$moduleName"
+        try {
+            $code = Invoke-RestMethod -Uri $fullUrl -UseBasicParsing -ErrorAction Stop
+            if (-not [string]::IsNullOrWhiteSpace($code)) {
+                Invoke-Expression $code
+                Write-Host " [OK] Modulo $moduleName caricato" -ForegroundColor Green
+                $global:workingRawBase = $baseUrl
+                $loaded = $true
+                break
             }
-            return
+        } catch {
+            # Prova con il fallback
         }
-
-        # Se la sintassi è valida, esegui il codice
-        Invoke-Expression $code
-        Write-Host " [OK] Modulo $moduleName caricato correttamente" -ForegroundColor Green
-
-    } catch {
-        Write-Host " [ERRORE DOWNLOAD] Impossibile scaricare $moduleName da $fullUrl" -ForegroundColor Red
-        Write-Host "   Detail: $_" -ForegroundColor DarkRed
+    }
+    if (-not $loaded) {
+        Write-Host " [ERRORE] Impossibile caricare $moduleName" -ForegroundColor Red
     }
 }
 
@@ -136,6 +107,12 @@ function Load-AllModules {
     Load-SingleModule "module-custom.ps1"
     Load-SingleModule "module-tasks.ps1"
     Load-SingleModule "module-utility.ps1"
+    
+    if ($global:workingRawBase) {
+        $global:rawBase = $global:workingRawBase
+    } else {
+        $global:rawBase = $rawUrls[0]
+    }
 }
 
 function Reload-All {
@@ -156,12 +133,10 @@ function Reload-All {
     Start-Sleep -Seconds 1
 }
 
-# Primo caricamento all'avvio
+# Primo caricamento
 Reload-All
 
-# ------------------------------------------------------------------------------
-# 5. CICLO PRINCIPALE DEL MENU
-# ------------------------------------------------------------------------------
+# Menu Principale
 do {
     Clear-Host
     Write-Host "=========================================" -ForegroundColor Cyan
@@ -171,21 +146,21 @@ do {
     $index = 1
 
     if (Get-Command Show-ModuleWingetMenu -ErrorAction SilentlyContinue) {
-        Show-ModuleWingetMenu ([ref]$index)
+        Show-ModuleWingetMenu -startIndex ([ref]$index)
     } else {
         Write-Host " --- 1. SOFTWARE STANDARD (WINGET) ---" -ForegroundColor DarkGray
         Write-Host " (Errore: Modulo module-winget.ps1 non disponibile)" -ForegroundColor Red
     }
 
     if (Get-Command Show-ModuleCustomMenu -ErrorAction SilentlyContinue) {
-        Show-ModuleCustomMenu ([ref]$index)
+        Show-ModuleCustomMenu -startIndex ([ref]$index)
     } else {
         Write-Host "`n --- 2. INSTALLER CUSTOM (INSTALLER/) ---" -ForegroundColor DarkGray
         Write-Host " (Errore: Modulo module-custom.ps1 non disponibile)" -ForegroundColor Red
     }
 
     if (Get-Command Show-ModuleTasksMenu -ErrorAction SilentlyContinue) {
-        Show-ModuleTasksMenu ([ref]$index)
+        Show-ModuleTasksMenu -startIndex ([ref]$index)
     } else {
         Write-Host "`n --- 3. OPERAZIONI BATCH (TASKS/) ---" -ForegroundColor DarkGray
         Write-Host " (Errore: Modulo module-tasks.ps1 non disponibile)" -ForegroundColor Red
@@ -195,26 +170,31 @@ do {
         Show-ModuleUtilityMenu
     } else {
         Write-Host "`n --- 4. UTILITY ---" -ForegroundColor DarkGray
-        Write-Host " [R] Ricarica moduli"
-        Write-Host " [Q] Esci"
+        Write-Host "[R] Ricarica moduli"
+        Write-Host "[Q] Esci"
         Write-Host "========================================="
     }
 
-    $selection = Read-Host "`nSeleziona un'opzione (es. 1, 3, 5 per Winget)"
+    $selection = Read-Host "Seleziona un'opzione (es. 1, 3, 5 per Winget)"
 
+    # Se l'input contiene numeri (singoli o multipli separati da spazio/virgola)
     if ($selection -match '\d') {
+        # Estrae il primo numero valido per determinare la sezione target
         $firstNumber = ($selection -split '[\s,]' | Where-Object { $_ -match '^\d+$' } | Select-Object -First 1) -as [int]
         
         if ($firstNumber -ge 1 -and $firstNumber -lt $index) {
-            $wCount = if ($global:wingetList) { $global:wingetList.Count } else { 0 }
-            $cCount = if ($global:customList) { $global:customList.Count } else { 0 }
+            $wCount = $global:wingetList.Count
+            $cCount = $global:customList.Count
 
+            # Selezione appartenente alla sezione Winget
             if ($firstNumber -le $wCount) {
                 Invoke-ModuleWingetAction -inputSelection $selection
             }
+            # Selezione appartenente alla sezione Custom
             elseif ($firstNumber -le ($wCount + $cCount)) {
                 Invoke-ModuleCustomAction -index ($firstNumber - $wCount - 1)
             }
+            # Selezione appartenente alla sezione Tasks
             else {
                 Invoke-ModuleTasksAction -index ($firstNumber - $wCount - $cCount - 1)
             }
@@ -222,10 +202,11 @@ do {
         }
     }
     else {
-        if ($selection -eq 'R' -or $selection -eq 'r') {
-            Reload-All
-        } elseif (Get-Command Invoke-ModuleUtilityAction -ErrorAction SilentlyContinue) {
+        # Gestione opzioni testuali (W, M, R, Q...)
+        if (Get-Command Invoke-ModuleUtilityAction -ErrorAction SilentlyContinue) {
             Invoke-ModuleUtilityAction -code $selection
+        } elseif ($selection -eq 'R' -or $selection -eq 'r') {
+            Reload-All
         }
     }
 
