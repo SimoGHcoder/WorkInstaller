@@ -18,7 +18,7 @@ $global:repo    = "WorkInstaller"
 
 # URL Base alternativi (Fallback se il branch principale varia)
 $rawUrls = @(
-    "https://raw.githubusercontent.com/$global:owner/$global:repo/blob/main",
+    "https://raw.githubusercontent.com/$global:owner/$global:repo/main",
     "https://raw.githubusercontent.com/$global:owner/$global:repo/master"
 )
 $global:apiBase = "https://api.github.com/repos/$global:owner/$global:repo/contents"
