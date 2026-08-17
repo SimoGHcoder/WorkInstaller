@@ -1,28 +1,24 @@
+# ==============================================================================
+# MODULO 1: GESTIONE APP WINGET (INSTALLAZIONE AUTOMATICA SILENTE)
+# ==============================================================================
+
 function global:Get-ModuleWingetList {
-    $list = @()
-    $url = "$global:rawBase/winget-apps.txt"
-    try {
-        $content = Invoke-RestMethod -Uri $url -UseBasicParsing -ErrorAction Stop
-        $lines = $content -split "`r?\n" | Where-Object { $_ -match '\|' }
-        foreach ($line in $lines) {
-            $parts = $line.Split('|')
-            if ($parts.Count -ge 2) {
-                $list += [PSCustomObject]@{
-                    Name = $parts[0].Trim()
-                    Id   = $parts[1].Trim()
-                }
-            }
-        }
-    } catch {
-        # Fallback se il file non esiste ancora
-    }
-    return $list
+    # Lista di app Winget standard predefinite per l'ambiente scolastico/lab
+    return @(
+        [PSCustomObject]@{ Id = "7zip.7zip"; Name = "7-Zip" },
+        [PSCustomObject]@{ Id = "VideoLAN.VLC"; Name = "VLC Media Player" },
+        [PSCustomObject]@{ Id = "Google.Chrome"; Name = "Google Chrome" },
+        [PSCustomObject]@{ Id = "Mozilla.Firefox"; Name = "Mozilla Firefox" },
+        [PSCustomObject]@{ Id = "Foxit.PDFReader"; Name = "Foxit PDF Reader" },
+        [PSCustomObject]@{ Id = "Notepad++.Notepad++"; Name = "Notepad++" },
+        [PSCustomObject]@{ Id = "Oracle.JavaRuntimeEnvironment"; Name = "Java JRE" }
+    )
 }
 
 function global:Show-ModuleWingetMenu ([ref]$startIndex) {
-    Write-Host " --- 1. SOFTWARE STANDARD (WINGET) ---" -ForegroundColor DarkGray
+    Write-Host " --- 1. SOFTWARE STANDARD WINGET (SILENT) ---" -ForegroundColor DarkGray
     if ($global:wingetList.Count -eq 0) {
-        Write-Host " (Nessuna app trovata in winget-apps.txt)" -ForegroundColor Yellow
+        Write-Host " (Nessuna app Winget configurata)" -ForegroundColor Yellow
         return
     }
     foreach ($item in $global:wingetList) {
@@ -31,9 +27,32 @@ function global:Show-ModuleWingetMenu ([ref]$startIndex) {
     }
 }
 
-function global:Invoke-ModuleWingetAction ([int]$index) {
-    if ($index -ge 0 -and $index -lt $global:wingetList.Count) {
-        $item = $global:wingetList[$index]
-        Install-WingetApp -id $item.Id -name $item.Name
+function global:Invoke-ModuleWingetAction ([string]$inputSelection) {
+    if ([string]::IsNullOrWhiteSpace($inputSelection)) { return }
+
+    # Converte l'input (es. "1,3,5" o "1 3 5") in indici numerici validi
+    $indexes = $inputSelection -split '[\s,]' | Where-Object { $_ -match '^\d+$' } | ForEach-Object { [int]$_ - 1 }
+
+    if ($indexes.Count -eq 0) {
+        Write-Host " [!] Selezione non valida." -ForegroundColor Yellow
+        return
+    }
+
+    foreach ($idx in $indexes) {
+        if ($idx -ge 0 -and $idx -lt $global:wingetList.Count) {
+            $app = $global:wingetList[$idx]
+            Write-Host "`n --> [Winget Silent] Avvio installazione di: $($app.Name)..." -ForegroundColor Cyan
+            
+            # Esecuzione silente senza interazione
+            winget install --id $app.Id --silent --accept-source-agreements --accept-package-agreements
+            
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host " [OK] $($app.Name) installato con successo." -ForegroundColor Green
+            } else {
+                Write-Host " [!] Installazione di $($app.Name) completata con codice: $LASTEXITCODE" -ForegroundColor Yellow
+            }
+        } else {
+            Write-Host " [!] Indice $($idx + 1) fuori scala, ignorato." -ForegroundColor Yellow
+        }
     }
 }
