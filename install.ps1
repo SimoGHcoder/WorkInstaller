@@ -1,81 +1,105 @@
 # ==============================================================================
-# SCRIPT INSTALLAZIONE SOFTWARE SCUOLA (100% DINAMICO)
+# WORKINSTALLER - RUNNER PRINCIPALE MODULARE
 # Repository: https://github.com/SimoGHcoder/WorkInstaller
 # ==============================================================================
 
-# 1. Forza l'uso di TLS 1.2
+# 1. Forza protocollo di sicurezza TLS 1.2
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-# 2. Verifica privilegi di Amministratore
+# 2. Controllo e richiesta elevazione ad Amministratore
 if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    Write-Host "Riavvio dello script con privilegi di Amministratore..." -ForegroundColor Yellow
+    Write-Host "Riavvio in corso con privilegi di Amministratore..." -ForegroundColor Yellow
     Start-Process powershell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
     exit
 }
 
-# 3. Configurazione Repository e API GitHub
-$owner      = "SimoGHcoder"
-$repo       = "WorkInstaller"
-$apiUrl     = "https://api.github.com/repos/$owner/$repo/contents/installer"
-$rawBase    = "https://raw.githubusercontent.com/$owner/$repo/refs/heads/main"
-$wingetTxt  = "$rawBase/winget-apps.txt"
+# 3. Parametri Repository GitHub
+$owner    = "SimoGHcoder"
+$repo     = "WorkInstaller"
+$rawBase  = "https://raw.githubusercontent.com/$owner/$repo/refs/heads/main"
+$apiBase  = "https://api.github.com/repos/$owner/$repo/contents"
 
-# Funzione per leggere l'elenco delle app Winget dal file TXT
+# --- FUNZIONI DI RECUPERO MODULI ---
+
+# Modulo 1: Lettura App Winget da winget-apps.txt
 function Get-WingetApps {
     try {
-        $content = Invoke-RestMethod -Uri $wingetTxt -ErrorAction Stop
+        $content = Invoke-RestMethod -Uri "$rawBase/winget-apps.txt" -ErrorAction Stop
         $lines = $content -split "`r?`n" | Where-Object { $_ -match '\|' -and -not $_.StartsWith("#") }
         $apps = @()
         foreach ($line in $lines) {
             $parts = $line.Split('|')
-            $apps += [PSCustomObject]@{
-                Name = $parts[0].Trim()
-                Id   = $parts[1].Trim()
-            }
+            $apps += [PSCustomObject]@{ Name = $parts[0].Trim(); Id = $parts[1].Trim() }
         }
         return $apps
-    } catch {
-        return @()
-    }
+    } catch { return @() }
 }
 
-# Funzione per recuperare i file custom (.exe e .msi) dalla cartella 'installer'
-function Get-CustomFiles {
+# Modulo 2: Scansione Eseguibili Custom (.exe / .msi)
+function Get-CustomInstallers {
     try {
-        $response = Invoke-RestMethod -Uri $apiUrl -Method Get -Headers @{ "User-Agent" = "PowerShell" } -ErrorAction Stop
-        $files = $response | Where-Object { $_.type -eq "file" -and ($_.name -like "*.exe" -or $_.name -like "*.msi") }
-        return $files
-    } catch {
-        return @()
-    }
+        $res = Invoke-RestMethod -Uri "$apiBase/installer" -Method Get -Headers @{ "User-Agent" = "PowerShell" } -ErrorAction Stop
+        return $res | Where-Object { $_.type -eq "file" -and ($_.name -like "*.exe" -or $_.name -like "*.msi") }
+    } catch { return @() }
 }
+
+# Modulo 3: Scansione Script di Operazioni Batch (.ps1 / .bat)
+function Get-BatchTasks {
+    try {
+        $res = Invoke-RestMethod -Uri "$apiBase/tasks" -Method Get -Headers @{ "User-Agent" = "PowerShell" } -ErrorAction Stop
+        return $res | Where-Object { $_.type -eq "file" -and ($_.name -like "*.ps1" -or $_.name -like "*.bat") }
+    } catch { return @() }
+}
+
+# --- FUNZIONI DI ESECUZIONE ---
 
 function Get-SilentArgs ([string]$fileName) {
     if ($fileName.EndsWith(".msi")) { return "/qn /norestart" } else { return "/S" }
 }
 
 function Install-WingetApp ([string]$id, [string]$name) {
-    Write-Host "--> Installazione di $name ($id) tramite Winget..." -ForegroundColor Yellow
+    Write-Host "--> [Winget] Installazione di $name ($id)..." -ForegroundColor Yellow
     winget install --id $id --silent --accept-package-agreements --accept-source-agreements
 }
 
-function Install-CustomApp ([string]$downloadUrl, [string]$fileName, [string]$arguments) {
+function Install-CustomApp ([string]$downloadUrl, [string]$fileName) {
     $outPath = "$env:TEMP\$fileName"
-    Write-Host "--> Download di $fileName in corso..." -ForegroundColor Yellow
+    $args = Get-SilentArgs $fileName
+    Write-Host "--> [Custom] Download di $fileName..." -ForegroundColor Yellow
     Invoke-WebRequest -Uri $downloadUrl -OutFile $outPath -UseBasicParsing
     
-    Write-Host "--> Esecuzione installazione per $fileName..." -ForegroundColor Yellow
-    Start-Process -FilePath $outPath -ArgumentList $arguments -Wait -PassThru
-    
+    Write-Host "--> [Custom] Esecuzione $fileName..." -ForegroundColor Yellow
+    Start-Process -FilePath $outPath -ArgumentList $args -Wait -PassThru
     if (Test-Path $outPath) { Remove-Item $outPath -Force }
     Write-Host "--> Completato!" -ForegroundColor Green
-    Start-Sleep -Seconds 1
 }
 
-# Caricamento iniziale dei dati
-Write-Host "Caricamento configurazioni da GitHub in corso..." -ForegroundColor Cyan
-$wingetApps = Get-WingetApps
-$customFiles = Get-CustomFiles
+function Execute-BatchTask ([string]$downloadUrl, [string]$fileName) {
+    $outPath = "$env:TEMP\$fileName"
+    Write-Host "--> [Task] Download dello script $fileName..." -ForegroundColor Yellow
+    Invoke-WebRequest -Uri $downloadUrl -OutFile $outPath -UseBasicParsing
+    
+    Write-Host "--> [Task] Esecuzione in corso..." -ForegroundColor Yellow
+    if ($fileName.EndsWith(".ps1")) {
+        powershell -ExecutionPolicy Bypass -File $outPath
+    } else {
+        cmd /c $outPath
+    }
+    
+    if (Test-Path $outPath) { Remove-Item $outPath -Force }
+    Write-Host "--> Task completato!" -ForegroundColor Green
+}
+
+# --- CARICAMENTO INIZIALE E CICLO MENU ---
+
+function Reload-AllModules {
+    Write-Host "Sincronizzazione moduli da GitHub..." -ForegroundColor Cyan
+    $global:wingetList  = Get-WingetApps
+    $global:customList  = Get-CustomInstallers
+    $global:taskList    = Get-BatchTasks
+}
+
+Reload-AllModules
 
 do {
     Clear-Host
@@ -83,79 +107,89 @@ do {
     Write-Host "     WORKINSTALLER - DEPLOYMENT UTILS    " -ForegroundColor Cyan
     Write-Host "=========================================" -ForegroundColor Cyan
     
-    # 1. Menu Winget Dinamico
-    Write-Host " --- SOFTWARE STANDARD (WINGET) ---" -ForegroundColor DarkGray
-    if ($wingetApps.Count -eq 0) {
-        Write-Host " (Nessuna app configurata in winget-apps.txt)" -ForegroundColor Gray
+    $index = 1
+
+    # 1. SEZIONE WINGET
+    Write-Host " --- 1. SOFTWARE STANDARD (WINGET) ---" -ForegroundColor DarkGray
+    if ($wingetList.Count -eq 0) {
+        Write-Host " (Nessuna app definita in winget-apps.txt)" -ForegroundColor Gray
     } else {
-        for ($i = 0; $i -lt $wingetApps.Count; $i++) {
-            $num = $i + 1
-            Write-Host "[$num] $($wingetApps[$i].Name)"
+        foreach ($app in $wingetList) {
+            Write-Host "[$index] $($app.Name)"
+            $index++
         }
     }
-    
-    # 2. Menu Custom Dinamico
+
+    # 2. SEZIONE INSTALLER CUSTOM
     Write-Host ""
-    Write-Host " --- SOFTWARE PERSONALIZZATI (INSTALLER) ---" -ForegroundColor DarkGray
-    $offset = $wingetApps.Count
-    if ($customFiles.Count -eq 0) {
-        Write-Host " (Nessun file .exe/.msi trovato nella cartella 'installer')" -ForegroundColor Gray
+    Write-Host " --- 2. INSTALLER CUSTOM (INSTALLER/) ---" -ForegroundColor DarkGray
+    if ($customList.Count -eq 0) {
+        Write-Host " (Nessun file .exe/.msi nella cartella 'installer')" -ForegroundColor Gray
     } else {
-        for ($j = 0; $j -lt $customFiles.Count; $j++) {
-            $num = $j + $offset + 1
-            Write-Host "[$num] $($customFiles[$j].name)"
+        foreach ($file in $customList) {
+            Write-Host "[$index] $($file.name)"
+            $index++
         }
     }
-    
+
+    # 3. SEZIONE OPERAZIONI BATCH / TASK
     Write-Host ""
-    Write-Host " --- OPERAZIONI BATCH ---" -ForegroundColor DarkGray
-    Write-Host "[A] Installa TUTTI i programmi (Winget + Custom)"
-    Write-Host "[R] Ricarica configurazioni da GitHub"
+    Write-Host " --- 3. OPERAZIONI BATCH (TASKS/) ---" -ForegroundColor DarkGray
+    if ($taskList.Count -eq 0) {
+        Write-Host " (Nessuno script trovato nella cartella 'tasks')" -ForegroundColor Gray
+    } else {
+        foreach ($task in $taskList) {
+            Write-Host "[$index] $($task.name)"
+            $index++
+        }
+    }
+
+    Write-Host ""
+    Write-Host " --- AZIONI DI SISTEMA ---" -ForegroundColor DarkGray
+    Write-Host "[A] Esegui INSTALLAZIONE COMPLETA (Tutti i software)"
+    Write-Host "[R] Ricarica moduli da GitHub"
     Write-Host "[Q] Esci"
     Write-Host "========================================="
-    
+
     $selection = Read-Host "Seleziona un'opzione"
-    
+
     if ($selection -match '^[0-9]+$') {
         $val = [int]$selection
         
-        # Scelta app Winget
-        if ($val -ge 1 -and $val -le $wingetApps.Count) {
-            $app = $wingetApps[$val - 1]
-            Install-WingetApp -id $app.Id -name $app.Name
-            Start-Sleep -Seconds 2
+        # Gestione selezione dinamica
+        if ($val -ge 1 -and $val -lt $index) {
+            $wCount = $wingetList.Count
+            $cCount = $customList.Count
+
+            if ($val -le $wCount) {
+                # Cliccata App Winget
+                $app = $wingetList[$val - 1]
+                Install-WingetApp -id $app.Id -name $app.Name
+                Start-Sleep -Seconds 2
+            }
+            elseif ($val -le ($wCount + $cCount)) {
+                # Cliccato Installer Custom
+                $file = $customList[$val - $wCount - 1]
+                Install-CustomApp -downloadUrl "$rawBase/installer/$($file.name)" -fileName $file.name
+                Start-Sleep -Seconds 2
+            }
+            else {
+                # Cliccata Operazione Batch / Task
+                $task = $taskList[$val - $wCount - $cCount - 1]
+                Execute-BatchTask -downloadUrl "$rawBase/tasks/$($task.name)" -fileName $task.name
+                Start-Sleep -Seconds 2
+            }
         }
-        # Scelta file Custom
-        elseif ($val -gt $wingetApps.Count -and $val -le ($wingetApps.Count + $customFiles.Count)) {
-            $index = $val - $wingetApps.Count - 1
-            $fileObj = $customFiles[$index]
-            $fileUrl = "$rawBase/installer/$($fileObj.name)"
-            $args = Get-SilentArgs $fileObj.name
-            Install-CustomApp -downloadUrl $fileUrl -fileName $fileObj.name -arguments $args
-        }
-    } 
+    }
     elseif ($selection -eq 'A' -or $selection -eq 'a') {
-        Write-Host "Avvio installazione completa di massa..." -ForegroundColor Green
-        
-        # Installa tutte le app Winget
-        foreach ($app in $wingetApps) {
-            Install-WingetApp -id $app.Id -name $app.Name
-        }
-        
-        # Installa tutti i file Custom
-        foreach ($fileObj in $customFiles) {
-            $fileUrl = "$rawBase/installer/$($fileObj.name)"
-            $args = Get-SilentArgs $fileObj.name
-            Install-CustomApp -downloadUrl $fileUrl -fileName $fileObj.name -arguments $args
-        }
-        
-        Write-Host "Tutte le installazioni sono state completate!" -ForegroundColor Green
+        Write-Host "Avvio installazione di massa..." -ForegroundColor Green
+        foreach ($app in $wingetList) { Install-WingetApp -id $app.Id -name $app.Name }
+        foreach ($file in $customList) { Install-CustomApp -downloadUrl "$rawBase/installer/$($file.name)" -fileName $file.name }
+        Write-Host "Installazioni completate!" -ForegroundColor Green
         Start-Sleep -Seconds 3
-    } 
+    }
     elseif ($selection -eq 'R' -or $selection -eq 'r') {
-        Write-Host "Aggiornamento dati da GitHub..." -ForegroundColor Yellow
-        $wingetApps = Get-WingetApps
-        $customFiles = Get-CustomFiles
+        Reload-AllModules
     }
 
 } until ($selection -eq 'Q' -or $selection -eq 'q')
